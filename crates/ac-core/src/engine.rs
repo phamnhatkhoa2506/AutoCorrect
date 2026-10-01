@@ -82,6 +82,10 @@ impl<C: Corrector> Engine<C> {
         &self.word
     }
 
+    pub fn corrector(&self) -> &C {
+        &self.corrector
+    }
+
     pub fn on_key(&mut self, key: Key) -> Action {
         match key {
             Key::Char(c) => {

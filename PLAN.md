@@ -217,9 +217,15 @@ Cần bộ **benchmark offline** (replay chuỗi phím rồi so kết quả) đ�
 - [ ] Latency: hiện 15–45 ms, gần như toàn bộ nằm trong `SendInput` (khoảng 1,5–2 ms mỗi phím gửi đi, do Windows chuyển từng phím qua các hook trên máy). Tăng ưu tiên luồng hook không giúp. Để Phase 1 xử lý bằng cách giảm số phím phải gửi, khi đã có bộ gõ riêng.
 
 ### Phase 1: MVP (3–4 tuần)
-- [ ] Bộ gõ Telex/VNI tự viết (có test suite đối chiếu với Unikey).
-- [ ] Bộ kiểm tra âm tiết, mô hình lỗi Telex, SymSpell cho tiếng Anh.
-- [ ] Gate theo app, hoàn tác bằng backspace, reset buffer khi click hoặc dùng phím mũi tên.
+- [x] 1.1 Bộ kiểm tra âm tiết + bộ gõ Telex dạng hàm thuần (`ac-telex`). VNI làm sau.
+- [x] 1.3 Lexicon: Leipzig (tin tức 2022, web 2015) + FrequencyWords, gộp theo tần suất tương đối → 6.795 âm tiết, 46.693 từ tiếng Anh (`ac-data`).
+- [x] 1.3 Noisy-channel corrector trên phím thô, cả Việt (qua Telex) lẫn Anh, mô hình lỗi: đảo phím, lệch phím QWERTY, nhầm thanh, thiếu/thừa phím dấu, gõ đôi, nhầm nguyên âm. Thay cho SymSpell.
+  - Chữ phổ biến (≥ 1000 lần mỗi tỷ từ) không bao giờ bị sửa; âm tiết hợp lệ chỉ được sửa dấu; tên riêng viết hoa đầu được giữ nguyên.
+  - Tốc độ: chữ đúng ~4 µs, lỗi gõ 0,2–1,4 ms.
+  - Chưa làm: lỗi cách 2 bước (`khogn`), chỉnh chi phí theo dữ liệu thật.
+- [ ] 1.2 Gắn bộ gõ Telex vào hook để thay Unikey (hiện composer mới chỉ dùng để sinh phương án sửa).
+- [ ] Gate theo app (terminal, IDE, ô mật khẩu).
+- [x] Hoàn tác bằng Backspace, reset buffer khi click hoặc dùng phím mũi tên.
 - [ ] Tray icon tối giản (Tauri).
 - [ ] Benchmark replay và các metric ở mục 7.
 

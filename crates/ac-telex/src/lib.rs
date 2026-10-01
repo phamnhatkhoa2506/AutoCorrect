@@ -6,5 +6,5 @@
 pub mod syllable;
 pub mod telex;
 
-pub use syllable::{is_valid_word, Tone};
+pub use syllable::{canonical, is_valid_word, Tone};
 pub use telex::{compose, Composition, Kind};

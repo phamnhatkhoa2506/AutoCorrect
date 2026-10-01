@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
 
-use ac_core::{Action, DictCorrector, Engine, Key};
+use ac_core::{Action, Decision, Engine, Key, Lexicon, SmartCorrector};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LCONTROL,
@@ -20,15 +20,28 @@ use crate::inject::{self, Job, INJECTED_TAG};
 use crate::log;
 
 struct State {
-    engine: Engine<DictCorrector>,
+    engine: Engine<SmartCorrector>,
     foreground: HWND,
 }
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State {
-        engine: Engine::new(DictCorrector::builtin()),
+        engine: Engine::new(corrector()),
         foreground: HWND::default(),
     });
+}
+
+fn corrector() -> SmartCorrector {
+    SmartCorrector::new(
+        Lexicon::parse(include_str!("../../../data/vi_syllables.tsv")),
+        Lexicon::parse(include_str!("../../../data/en_words.tsv")),
+    )
+}
+
+/// Builds the engine (parses the lexicons) now, on the hook thread, instead
+/// of on the first key press.
+pub fn init() {
+    STATE.with(|_| {});
 }
 
 pub unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -85,7 +98,16 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let before = state.engine.current_word().to_string();
         let action = state.engine.on_key(key);
         if key == Key::Space && log::debug_enabled() {
-            log::debug(format!("  word on Space: {before:?} -> {:?}", state.engine.last_decision()));
+            let decision = state.engine.last_decision();
+            let mut line = format!("  word on Space: {before:?} -> {decision:?}");
+            if decision == Decision::NoCandidate {
+                if let Some(r) = state.engine.corrector().rank(&before) {
+                    let top: Vec<String> =
+                        r.candidates.iter().take(3).map(|(w, s)| format!("{w} {s:.1}")).collect();
+                    line += &format!("  (typed {:.1}; top: {})", r.typed, top.join(", "));
+                }
+            }
+            log::debug(line);
         }
         match action {
             Action::Pass => None,
@@ -107,7 +129,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
     true
 }
 
-fn with_engine(f: impl FnOnce(&mut Engine<DictCorrector>) -> Action) {
+fn with_engine(f: impl FnOnce(&mut Engine<SmartCorrector>) -> Action) {
     STATE.with(|cell| {
         if let Ok(mut state) = cell.try_borrow_mut() {
             f(&mut state.engine);

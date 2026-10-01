@@ -1,0 +1,13 @@
+[package]
+name = "ac-data"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "build-lexicon"
+path = "src/main.rs"
+
+[dependencies]
+ac-telex = { path = "../ac-telex" }
+unicode-normalization = "0.1"

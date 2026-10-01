@@ -57,7 +57,7 @@ impl Corrector for DictCorrector {
 }
 
 /// Applies the casing pattern of `original` (lower / Capitalized / UPPER) to `fix`.
-fn match_case(original: &str, fix: &str) -> String {
+pub(crate) fn match_case(original: &str, fix: &str) -> String {
     let mut letters = original.chars().filter(|c| c.is_alphabetic());
     let first_upper = letters.next().is_some_and(char::is_uppercase);
     let rest: Vec<char> = letters.collect();

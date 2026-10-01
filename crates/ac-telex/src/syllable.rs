@@ -76,14 +76,15 @@ const CH_NH_NUCLEI: &[&str] = &["a", "ê", "i", "y", "oa", "uê", "uy"];
 /// vowel follows ("gì" is g + i, "qua" is qu + a).
 pub fn initial_len(chars: &[char]) -> usize {
     for init in INITIALS {
-        let ic: Vec<char> = init.chars().collect();
-        if !chars.starts_with(&ic) {
+        // Hot path of the corrector: compare without allocating.
+        let len = init.chars().count();
+        if chars.len() < len || !init.chars().zip(chars).all(|(a, &b)| a == b) {
             continue;
         }
         if matches!(*init, "gi" | "qu") && !chars.get(2).is_some_and(|&c| is_vowel(c)) {
             continue;
         }
-        return ic.len();
+        return len;
     }
     0
 }
@@ -220,22 +221,47 @@ pub fn split_tone(c: char) -> (char, Option<Tone>) {
     (c, None)
 }
 
-/// True if `word` is a correctly spelled Vietnamese syllable (either tone
-/// placement style is accepted).
-pub fn is_valid_word(word: &str) -> bool {
+/// Lowercase toneless chars and the tone of `word`; `None` if it carries
+/// more than one tone mark.
+fn untone(word: &str) -> Option<(Vec<char>, Option<Tone>)> {
     let mut tone = None;
     let mut chars = Vec::new();
     for c in word.chars().flat_map(char::to_lowercase) {
         let (base, t) = split_tone(c);
         if t.is_some() {
             if tone.is_some() {
-                return false; // two tone marks
+                return None;
             }
             tone = t;
         }
         chars.push(base);
     }
-    check(&chars, tone, Mode::Complete).is_some()
+    Some((chars, tone))
+}
+
+/// True if `word` is a correctly spelled Vietnamese syllable (either tone
+/// placement style is accepted).
+pub fn is_valid_word(word: &str) -> bool {
+    untone(word).is_some_and(|(chars, tone)| check(&chars, tone, Mode::Complete).is_some())
+}
+
+/// Lowercase form with the tone on the traditional vowel ("Hoà" -> "hòa"),
+/// matching what the Telex composer produces; `None` if not a valid syllable.
+/// Expects precomposed (NFC) input.
+pub fn canonical(word: &str) -> Option<String> {
+    let (chars, tone) = untone(word)?;
+    let parts = check(&chars, tone, Mode::Complete)?;
+    let at = tone.map(|t| (tone_index(&chars, &parts), t));
+    Some(
+        chars
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| match at {
+                Some((pos, t)) if pos == i => with_tone(c, t),
+                _ => c,
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -261,6 +287,15 @@ mod tests {
         ] {
             assert!(!is_valid_word(w), "{w} should be invalid");
         }
+    }
+
+    #[test]
+    fn canonical_form() {
+        assert_eq!(canonical("Hoà").as_deref(), Some("hòa"));
+        assert_eq!(canonical("hòa").as_deref(), Some("hòa"));
+        assert_eq!(canonical("THUỶ").as_deref(), Some("thủy"));
+        assert_eq!(canonical("được").as_deref(), Some("được"));
+        assert_eq!(canonical("hello"), None);
     }
 
     #[test]

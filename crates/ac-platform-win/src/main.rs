@@ -21,6 +21,7 @@ fn main() -> Result<()> {
     let has_flag = |flag: &str| std::env::args().any(|a| a == flag);
     log::start(has_flag("--debug"));
     inject::start();
+    hook::init();
 
     unsafe {
         // Every injected key makes Windows call this thread's hook; a high
@@ -34,7 +35,7 @@ fn main() -> Result<()> {
         let keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook::keyboard_proc), Some(hinstance), 0)?;
         let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(hook::mouse_proc), Some(hinstance), 0)?;
 
-        println!("ac-spike running. Type `teh ` or `dunhf ` anywhere. Ctrl+C to quit.");
+        println!("ac-spike running. Type `teh `, `dunhf `, `mooir ` anywhere. Ctrl+C to quit.");
         println!("Turn the Vietnamese IME (Unikey/EVKey) OFF for this spike.\n");
 
         // Low-level hooks are called on this thread, so it must keep pumping.
