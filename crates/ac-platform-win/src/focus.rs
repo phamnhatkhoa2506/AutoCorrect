@@ -5,6 +5,7 @@
 //! that runs on a worker; until it answers, the focus counts as a password
 //! field, so no key of a password can be composed or kept.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
@@ -17,14 +18,14 @@ use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, SetWinEventHook, HWINEVENTHOOK,
+    CUIAutomation, IUIAutomation, IUIAutomationElement, SetWinEventHook, HWINEVENTHOOK,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowThreadProcessId, EVENT_OBJECT_FOCUS, EVENT_SYSTEM_FOREGROUND,
     WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
-use crate::hook;
+use crate::{hook, log};
 use crate::policy::classify;
 
 /// A password field has focus, or the check of a new focus is still running.
@@ -43,13 +44,18 @@ pub fn start() {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let automation: Option<IUIAutomation> =
             CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok();
+        // Fields seen masked, so "show password" (which turns the field into
+        // plain text) does not unlock them.
+        let mut seen_masked: HashSet<String> = HashSet::new();
+        let mut was_password = false;
         while rx.recv().is_ok() {
             while rx.try_recv().is_ok() {} // only the latest focus matters
-            let password = automation
-                .as_ref()
-                .and_then(|a| a.GetFocusedElement().ok())
-                .and_then(|e| e.CurrentIsPassword().ok())
-                .is_some_and(|b| b.as_bool());
+            let element = automation.as_ref().and_then(|a| a.GetFocusedElement().ok());
+            let password = element.is_some_and(|e| is_password_field(&e, &mut seen_masked));
+            if password != was_password && log::debug_enabled() {
+                log::debug(format!("focus: {}", if password { "password field (hands off)" } else { "normal field" }));
+            }
+            was_password = password;
             BLOCKED.store(password, Ordering::Relaxed);
         }
     });
@@ -62,6 +68,32 @@ pub fn start() {
     }
     on_foreground(unsafe { GetForegroundWindow() });
     recheck_focus();
+}
+
+/// Masked now, masked earlier (same process, id and name), or labelled as a
+/// password ("Password", "mật khẩu", id "pwd"...).
+unsafe fn is_password_field(e: &IUIAutomationElement, seen_masked: &mut HashSet<String>) -> bool {
+    let id = e.CurrentAutomationId().map(|s| s.to_string()).unwrap_or_default();
+    let name = e.CurrentName().map(|s| s.to_string()).unwrap_or_default();
+    let pid = e.CurrentProcessId().unwrap_or_default();
+    // Unnamed fields cannot be told apart: never remember those.
+    let key = (!id.is_empty() || !name.is_empty()).then(|| format!("{pid}|{id}|{name}"));
+
+    let masked = e.CurrentIsPassword().is_ok_and(|b| b.as_bool());
+    if masked {
+        if let Some(key) = &key {
+            seen_masked.insert(key.clone());
+        }
+        return true;
+    }
+    key.is_some_and(|k| seen_masked.contains(&k)) || looks_like_password(&id) || looks_like_password(&name)
+}
+
+fn looks_like_password(text: &str) -> bool {
+    const WORDS: &[&str] =
+        &["password", "passwd", "pwd", "passcode", "passphrase", "mật khẩu", "mat khau", "matkhau"];
+    let text = text.to_lowercase();
+    WORDS.iter().any(|w| text.contains(w))
 }
 
 unsafe extern "system" fn on_event(
@@ -110,5 +142,20 @@ pub fn process_name(hwnd: isize) -> String {
         }
         let path = String::from_utf16_lossy(&buf[..len as usize]);
         path.rsplit('\\').next().unwrap_or(&path).to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn password_labels() {
+        for label in ["Password", "Nhập mật khẩu", "Mat khau", "login-pwd", "confirmPassword"] {
+            assert!(looks_like_password(label), "{label}");
+        }
+        for label in ["Username", "Passport number", "Search", ""] {
+            assert!(!looks_like_password(label), "{label}");
+        }
     }
 }
