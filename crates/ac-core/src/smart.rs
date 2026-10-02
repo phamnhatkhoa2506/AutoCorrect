@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 
-use ac_telex::{compose, Kind};
+use ac_telex::syllable::split_tone;
+use ac_telex::{compose, Kind, Tone};
 
 use crate::corrector::{match_case, Corrector};
 use crate::edits::edits1;
@@ -99,15 +100,17 @@ impl SmartCorrector {
     fn candidates(&self, keys: &str, vietnamese: Option<String>) -> Vec<(String, f64)> {
         // A well-formed syllable was typed: Vietnamese syllables are so dense
         // that changing a letter almost always lands on another one ("khoi" ->
-        // "khi"), a real-word correction that needs context. Only fix marks.
-        let syllable = vietnamese.is_some();
+        // "khi", "iết" -> "siết"), a real-word correction that needs context.
+        // Only the kind of mark may change (hỏi <-> ngã, ô <-> ơ): same letters,
+        // and a tone stays a tone ("ạn" was typed with "j" on purpose).
+        let required = vietnamese.as_deref().map(skeleton);
         let typed_texts: Vec<String> = std::iter::once(keys.to_string()).chain(vietnamese).collect();
 
         // Several slips can lead to the same word: their probabilities add up.
         let mut scores: HashMap<String, f64> = HashMap::new();
-        for slip in edits1(keys).into_iter().filter(|s| s.marks_only || !syllable) {
+        for slip in edits1(keys).into_iter().filter(|s| s.marks_only || required.is_none()) {
             for (text, f) in self.readings(&slip.keys) {
-                if typed_texts.contains(&text) {
+                if typed_texts.contains(&text) || required.as_ref().is_some_and(|r| !same_word(r, &skeleton(&text))) {
                     continue;
                 }
                 let e = scores.entry(text).or_insert(f64::NEG_INFINITY);
@@ -156,6 +159,44 @@ impl Corrector for SmartCorrector {
     }
 }
 
+/// Whether `b` is `a` with at most a plausibly mistaken mark: same base
+/// letters, and the same tone, hỏi/ngã swapped, or the tone of a
+/// neighbouring key (s/x, r/f). Adding or dropping a tone is never a slip.
+fn same_word(a: &(String, Option<Tone>), b: &(String, Option<Tone>)) -> bool {
+    use Tone::{Hoi, Huyen, Nga, Sac};
+    let tones_ok = match (a.1, b.1) {
+        (x, y) if x == y => true,
+        (Some(x), Some(y)) => matches!(
+            (x, y),
+            (Hoi, Nga) | (Nga, Hoi) | (Sac, Nga) | (Nga, Sac) | (Hoi, Huyen) | (Huyen, Hoi)
+        ),
+        _ => false,
+    };
+    a.0 == b.0 && tones_ok
+}
+
+/// Base letters of a word and its tone: "mỗi" -> ("moi", Some(Nga)).
+fn skeleton(text: &str) -> (String, Option<Tone>) {
+    let mut toned = None;
+    let letters = text
+        .chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| {
+            let (base, tone) = split_tone(c);
+            toned = toned.or(tone);
+            match base {
+                'ă' | 'â' => 'a',
+                'ê' => 'e',
+                'ô' | 'ơ' => 'o',
+                'ư' => 'u',
+                'đ' => 'd',
+                other => other,
+            }
+        })
+        .collect();
+    (letters, toned)
+}
+
 /// ln(e^a + e^b) without overflow.
 fn log_add(a: f64, b: f64) -> f64 {
     let (hi, lo) = if a > b { (a, b) } else { (b, a) };
@@ -202,6 +243,10 @@ mod tests {
         for typed in [
             "hello", "the", "terminal", "dungf", "tieengs", "dduowcj", "khoong", "npm", "git",
             "kubectl", "cargo", "Tuan", "nhanh", "toi",
+            // Well-formed syllables: never add/remove a tone or change letters.
+            "anj",   // ạn: the tone was typed on purpose, not "an"
+            "ieets", // iết: not "siết" (s here would be a letter, not a tone)
+            "khoi",  // no tone typed: do not guess "khỏi"
         ] {
             assert_eq!(c.correct(typed), None, "{typed}: {:?}", c.rank(typed));
         }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub const TRANSPOSE: f64 = 4.0;
 /// Hitting a neighbouring key instead of the intended one.
 pub const ADJACENT: f64 = 4.5;
-/// Typing the wrong tone key (hỏi/ngã confusion is very common).
+/// Hỏi typed for ngã or the reverse, a very common spelling confusion.
 pub const TONE_SWAP: f64 = 4.0;
 /// Forgetting a Telex mark key (the second "o" of "ô", a "w", a tone).
 pub const MISSING_MARK: f64 = 4.5;
@@ -74,8 +74,13 @@ pub fn edits1(keys: &str) -> Vec<Slip> {
         }
 
         for c in ('a'..='z').filter(|&c| c != k[i]) {
-            let (cost, marks_only) = if TONE_KEYS.contains(k[i]) && TONE_KEYS.contains(c) {
-                (TONE_SWAP, true)
+            let tones = TONE_KEYS.contains(k[i]) && TONE_KEYS.contains(c);
+            let (cost, marks_only) = if tones && matches!((k[i], c), ('r', 'x') | ('x', 'r')) {
+                (TONE_SWAP, true) // hỏi/ngã: a spelling confusion, not a slip
+            } else if tones && neighbours(k[i]).contains(c) {
+                (ADJACENT, true) // neighbouring tone keys: s/x, r/f
+            } else if tones {
+                continue; // j for s is not a plausible mistake
             } else if neighbours(k[i]).contains(c) {
                 (ADJACENT, false)
             } else if VOWELS.contains(k[i]) && VOWELS.contains(c) {
@@ -128,6 +133,8 @@ mod tests {
         assert_eq!(cost("teh", "the"), Some(TRANSPOSE));
         assert_eq!(cost("dunhf", "dungf"), Some(ADJACENT)); // h next to g
         assert_eq!(cost("mooix", "mooir"), Some(TONE_SWAP));
+        assert_eq!(cost("as", "ax"), Some(ADJACENT)); // neighbouring tone keys
+        assert_eq!(cost("anj", "ans"), None); // j and s: not a plausible slip
         assert_eq!(cost("toi", "tooi"), Some(DOUBLE));
         assert_eq!(cost("toi", "tois"), Some(MISSING_MARK));
         assert_eq!(cost("untill", "until"), Some(DOUBLE));
