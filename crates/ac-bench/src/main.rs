@@ -63,6 +63,8 @@ struct Word {
     prev: Option<String>,
     /// The words before this one, up to three, oldest first (`prev` is the last).
     history: Vec<String>,
+    /// The word that follows it in the sentence (diagnostics only).
+    next: Option<String>,
     /// Written with a capital first letter (names, sentence starts).
     capital: bool,
 }
@@ -109,7 +111,7 @@ fn words(sentence: &str, language: Language) -> Vec<Word> {
         match text {
             Some(text) => {
                 let keys = if language == Language::Vietnamese { to_keys(&text) } else { text.clone() };
-                out.push(Word { text: text.clone(), keys, prev: prev.take(), history: history.clone(), capital });
+                out.push(Word { text: text.clone(), keys, prev: prev.take(), history: history.clone(), next: None, capital });
                 history.push(text.clone());
                 if history.len() > 3 {
                     history.remove(0);
@@ -134,7 +136,108 @@ fn words(sentence: &str, language: Language) -> Vec<Word> {
         }
     }
     finish(&mut run, &mut prev, &mut history, &mut out);
+    for i in 1..out.len() {
+        if out[i].prev.as_deref() == Some(out[i - 1].text.as_str()) {
+            out[i - 1].next = Some(out[i].text.clone());
+        }
+    }
     out
+}
+
+/// Why typos are missed or fixed wrongly: is the right word even a
+/// candidate, ranked first, blocked by the caution thresholds, or is the
+/// typo a real word? Also the accuracy of simply taking the top candidate
+/// (no thresholds), with and without the word that follows as an oracle.
+fn diagnose(corrector: &SmartCorrector, cases: &[Case]) {
+    #[derive(Default)]
+    struct Group {
+        n: u32,
+        right: u32,
+        // Not right: (typo is a real word) x (right word: absent, first, lower).
+        bad: [[u32; 3]; 2],
+        capital: u32,
+        top1: u32,
+        top1_with_next: u32,
+        with_next: u32,
+        top1_on_next: u32,
+    }
+    let mut groups = [Group::default(), Group::default(), Group::default()];
+    for case in cases {
+        let Some(typed) = &case.typed else { continue };
+        let g = &mut groups[if case.bare { 2 } else if is_two_slips(&case.word.keys, typed) { 1 } else { 0 }];
+        g.n += 1;
+        let history: Vec<&str> = case.word.history.iter().map(String::as_str).collect();
+        let typed_keys = typed_as(typed, case.word.capital);
+        let outcome = corrector.correct_in(&typed_keys, &history).map(|f| f.to_lowercase());
+        let fixed_right = outcome.as_deref() == Some(case.word.text.as_str());
+        if fixed_right {
+            g.right += 1;
+        }
+        let ranking = if case.bare {
+            if case.word.capital {
+                g.capital += 1;
+                continue;
+            }
+            corrector.rank_bare(&typed_keys, &history)
+        } else {
+            corrector.rank_in(&typed_keys, &history)
+        };
+        let Some(ranking) = ranking else {
+            if !fixed_right {
+                g.bad[0][0] += 1;
+            }
+            continue;
+        };
+        let position = ranking.candidates.iter().position(|(w, _)| *w == case.word.text);
+        if position == Some(0) {
+            g.top1 += 1;
+        }
+        if !fixed_right {
+            let real = usize::from(ranking.typed > f64::NEG_INFINITY);
+            let class = match position {
+                None => 0,
+                Some(0) => 1,
+                Some(_) => 2,
+            };
+            g.bad[real][class] += 1;
+        }
+        if let Some(next) = &case.word.next {
+            g.with_next += 1;
+            if position == Some(0) {
+                g.top1_on_next += 1;
+            }
+            let best = ranking
+                .candidates
+                .iter()
+                .map(|(w, s)| (w, s + corrector.right_context_bonus(w, next)))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(w, _)| w.clone());
+            if best.as_deref() == Some(case.word.text.as_str()) {
+                g.top1_with_next += 1;
+            }
+        }
+    }
+    let pct = |part: u32, whole: u32| if whole == 0 { 0.0 } else { 100.0 * f64::from(part) / f64::from(whole) };
+    println!("  why typos are not fixed (Vietnamese; share of all typos in the group):");
+    for (name, g) in ["one slip", "two slips", "no marks"].iter().zip(&groups) {
+        let b = &g.bad;
+        println!("    {name} ({} typos): fixed right {:.1}%", g.n, pct(g.right, g.n));
+        println!(
+            "      typo is a NEW word : right word not a candidate {:.1}%, ranked first but blocked {:.1}%, ranked lower {:.1}%",
+            pct(b[0][0], g.n), pct(b[0][1], g.n), pct(b[0][2], g.n)
+        );
+        println!(
+            "      typo is a real word: right word not a candidate {:.1}%, ranked first but blocked {:.1}%, ranked lower {:.1}%",
+            pct(b[1][0], g.n), pct(b[1][1], g.n), pct(b[1][2], g.n)
+        );
+        if g.capital > 0 {
+            println!("      capitalised (left alone on purpose): {:.1}%", pct(g.capital, g.n));
+        }
+        println!(
+            "      top candidate is right (no thresholds): {:.1}%  |  where the next word is known: {:.1}% -> {:.1}% with it",
+            pct(g.top1, g.n), pct(g.top1_on_next, g.with_next), pct(g.top1_with_next, g.with_next)
+        );
+    }
 }
 
 /// QWERTY neighbours, written independently of the corrector's table: same
@@ -497,6 +600,10 @@ fn main() {
                 Case { word, typed, bare: false }
             })
             .collect();
+        if name == "Vietnamese" && args.iter().any(|a| a == "--diagnose") {
+            corrector.set_context(true);
+            diagnose(&corrector, &cases);
+        }
         println!("\n== {name}: {} words, {} with typos ==", all.len(), cases.iter().filter(|c| c.typed.is_some()).count());
         for (label, context) in [("no context  ", false), ("with context", true)] {
             corrector.set_context(context);

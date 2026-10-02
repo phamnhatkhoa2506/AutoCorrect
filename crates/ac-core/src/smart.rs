@@ -491,6 +491,43 @@ impl SmartCorrector {
         self.rank_in(word, prev.as_slice())
     }
 
+    /// Diagnostics for a word typed without marks: the score of the bare word
+    /// and of its accented readings, best first (what `restore_marks` weighs).
+    pub fn rank_bare(&self, keys: &str, history: &[&str]) -> Option<Ranking> {
+        let ctx = self.context_of(history);
+        let score = |id: u32, f: f64| self.with_context(f, self.ngram_vi(ctx, id));
+        let typed = match (self.vi.id(keys), self.vi.log_freq(keys)) {
+            (Some(id), Some(f)) => score(id, f),
+            _ => UNSEEN_SYLLABLE,
+        };
+        let mut candidates: Vec<(String, f64)> = self
+            .bare_index
+            .get(keys)?
+            .iter()
+            .filter_map(|&id| {
+                let (w, f) = &self.vi.words()[id as usize];
+                (w.as_str() != keys).then(|| (w.clone(), score(id, *f)))
+            })
+            .collect();
+        sorted_desc(&mut candidates);
+        Some(Ranking { typed, candidates })
+    }
+
+    /// Diagnostics: what the word after `candidate` says for it, as the
+    /// ln likelihood ratio of that pair against the word on its own. This is
+    /// context the app never has when it decides (the word is not typed yet).
+    pub fn right_context_bonus(&self, candidate: &str, next: &str) -> f64 {
+        let (Some(a), Some(b), Some(f)) = (self.vi.id(&candidate.to_lowercase()), self.vi.id(next), self.vi.log_freq(next)) else {
+            return 0.0;
+        };
+        let w = self.tuning.bigram_weight;
+        let uni = (f - LN_BILLION).exp();
+        match self.vi_bigrams.ln_prob(a, b) {
+            Some(lp) => (w * lp.exp() + (1.0 - w) * uni).ln() - uni.ln(),
+            None => (1.0 - w).ln(),
+        }
+    }
+
     pub fn rank_in(&self, word: &str, history: &[&str]) -> Option<Ranking> {
         let keys = Self::keys_of(word)?;
         let (typed, vietnamese) = self.typed(&keys);
@@ -502,6 +539,10 @@ impl SmartCorrector {
         }
         Some(Ranking { typed, candidates })
     }
+}
+
+fn sorted_desc(candidates: &mut [(String, f64)]) {
+    candidates.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 }
 
 /// Candidates by descending score (ties alphabetically, for determinism).
