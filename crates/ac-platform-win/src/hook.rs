@@ -223,7 +223,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         Key::Space => JobKind::Fix,
         _ => JobKind::Compose,
     };
-    inject::queue(Job {
+    inject::run(Job {
         started,
         kind,
         from: before,

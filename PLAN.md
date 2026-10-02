@@ -185,6 +185,7 @@ Chính sách mặc định theo app:
 - **Sự kiện foreground của WinEvent có thể đến sai thứ tự** (bấm taskbar báo `explorer.exe` sau app thật): hook tự phân loại lại cửa sổ thật mỗi khi foreground đổi.
 - **"Hiện mật khẩu" biến ô mật khẩu thành ô chữ thường**: nhớ các ô từng bị che (process + AutomationId + tên) và nhận diện theo nhãn (password, pwd, mật khẩu…).
 - **Phím hủy dấu không liền kề** (`rece` → `rêc` rồi thêm `e`): hiện lại đúng mọi phím đã gõ, không làm mất chữ.
+- **Gửi phím thay thế trên luồng riêng làm phím gõ tiếp vượt mặt nó**: lỗi nhân đôi chữ (`toôi`) xuất hiện lúc máy bận ngay sau khi khởi động, rồi tự hết. `SendInput` giờ chạy ngay trong hàm bắt phím, nên phím thật gõ tiếp luôn xếp hàng sau phím của app (đổi lại hàm bắt phím chặn ~15–40 ms mỗi lần thay).
 - **Không tự động test bằng cách giả lập gõ phím lên desktop thật**, vì phím có thể rơi vào cửa sổ khác. Test E2E phải dùng một cửa sổ test riêng do chính app tạo, và kiểm tra đúng cửa sổ đó đang được focus trước mỗi lần gửi phím.
 
 ---

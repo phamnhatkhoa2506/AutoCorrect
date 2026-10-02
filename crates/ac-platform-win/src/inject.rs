@@ -1,11 +1,13 @@
-//! Text replacement via SendInput, on a dedicated thread.
+//! Text replacement via SendInput, called from inside the keyboard hook.
 //!
-//! Calling SendInput from inside the low-level hook makes it wait on that same
-//! hook (measured 20-50 ms), so the hook only queues a job and returns.
+//! This runs *before* the hook returns, on purpose: the keys the user types
+//! next only reach the program after the hook returns, so they always queue
+//! behind the replacement. Handing the job to another thread (as an earlier
+//! version did) let those keys overtake it whenever that thread was late,
+//! for instance while the machine was busy right after startup, which
+//! duplicated or misplaced letters. The price is that SendInput takes
+//! 15-40 ms here, a delay that keys typed meanwhile wait out in the queue.
 
-use std::sync::mpsc::{self, Sender};
-use std::sync::OnceLock;
-use std::thread;
 use std::time::Instant;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -37,35 +39,22 @@ pub struct Job {
     pub hwnd: isize,
 }
 
-static TX: OnceLock<Sender<Job>> = OnceLock::new();
-
-pub fn start() {
-    let (tx, rx) = mpsc::channel::<Job>();
-    let _ = TX.set(tx);
-    thread::spawn(move || {
-        for job in rx {
-            let inputs = build_inputs(job.backspaces, &job.text);
-            let send_start = Instant::now();
-            let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
-            log::send(Event {
-                latency: job.started.elapsed(),
-                send_time: send_start.elapsed(),
-                kind: job.kind,
-                from: job.from,
-                backspaces: job.backspaces,
-                text: job.text,
-                expected_inputs: inputs.len(),
-                sent_inputs: sent,
-                hwnd: job.hwnd,
-            });
-        }
+/// Sends the replacement now and reports it to the log thread.
+pub fn run(job: Job) {
+    let inputs = build_inputs(job.backspaces, &job.text);
+    let send_start = Instant::now();
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    log::send(Event {
+        latency: job.started.elapsed(),
+        send_time: send_start.elapsed(),
+        kind: job.kind,
+        from: job.from,
+        backspaces: job.backspaces,
+        text: job.text,
+        expected_inputs: inputs.len(),
+        sent_inputs: sent,
+        hwnd: job.hwnd,
     });
-}
-
-pub fn queue(job: Job) {
-    if let Some(tx) = TX.get() {
-        let _ = tx.send(job);
-    }
 }
 
 /// `backspaces` Backspaces followed by `text`, as key down/up pairs.

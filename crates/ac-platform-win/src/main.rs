@@ -55,7 +55,6 @@ fn main() -> Result<()> {
     }
 
     log::start(debug);
-    inject::start();
     let mut saved = settings::load();
     if has_flag("--en") {
         saved.vietnamese = false;
