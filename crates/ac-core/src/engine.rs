@@ -53,11 +53,25 @@ struct LastCorrection {
     corrected: String,
     /// The word before it, restored when the correction is undone.
     context: Option<String>,
+    /// The words before that one.
+    earlier: Vec<String>,
     /// What ended the word: a space, or the punctuation typed.
     delimiter: char,
     /// A Backspace deleted that delimiter (the word is being resumed), so
     /// the screen shows the fix alone.
     delimiter_removed: bool,
+}
+
+/// How many words before the previous one are remembered.
+const EARLIER_WORDS: usize = 3;
+
+/// `earlier` followed by `word`, keeping only the most recent few.
+fn remember(earlier: &[String], word: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = earlier.to_vec();
+    out.extend(word.map(str::to_string));
+    let extra = out.len().saturating_sub(EARLIER_WORDS);
+    out.drain(..extra);
+    out
 }
 
 /// A word undone this many times is never corrected again this session.
@@ -98,6 +112,9 @@ pub struct Engine<C: Corrector> {
     /// the corrector uses to rank candidates. `None` at the start of a line
     /// or after anything that may have moved the caret.
     context: Option<String>,
+    /// The few words before `context`, oldest first: with it, the phrase
+    /// whose language the corrector weighs.
+    earlier: Vec<String>,
     /// The buffer is not known to hold the whole on-screen word.
     untracked: bool,
     /// Characters typed since the last reset that are no longer part of
@@ -132,6 +149,7 @@ impl<C: Corrector> Engine<C> {
             word: Word::default(),
             prev_word: None,
             context: None,
+            earlier: Vec::new(),
             untracked: false,
             committed: 0,
             select_all: false,
@@ -258,6 +276,7 @@ impl<C: Corrector> Engine<C> {
         self.word = Word::default();
         self.prev_word = None;
         self.context = None;
+        self.earlier.clear();
         self.untracked = false;
         self.committed = 0;
         self.last = None;
@@ -307,6 +326,7 @@ impl<C: Corrector> Engine<C> {
         self.committed += shown_len + 1; // the word and its delimiter
         let untracked = std::mem::take(&mut self.untracked);
         let context = self.context.take();
+        let earlier = std::mem::take(&mut self.earlier);
         let just_undone = self.just_undone.take().is_some_and(|k| k == word.keys);
         let undos = self.undos.get(&word.keys.to_lowercase()).copied().unwrap_or(0);
         // Only a fully known, non-empty word can be restored on Backspace.
@@ -314,6 +334,9 @@ impl<C: Corrector> Engine<C> {
         // What the next word sees as context: this one, if we know it, unless
         // punctuation starts a new phrase (as when the word pairs were counted).
         self.context = (!word.keys.is_empty() && !untracked && !punct).then(|| word.shown.clone());
+        if self.context.is_some() {
+            self.earlier = remember(&earlier, context.as_deref());
+        }
 
         self.decision = if word.keys.is_empty() {
             Decision::EmptyWord
@@ -327,7 +350,8 @@ impl<C: Corrector> Engine<C> {
             Decision::IgnoredAfterUndos(undos)
         } else {
             let keys = self.method.telex_keys(&word.keys);
-            match self.corrector.correct_after(&keys, context.as_deref()) {
+            let history: Vec<&str> = earlier.iter().map(String::as_str).chain(context.as_deref()).collect();
+            match self.corrector.correct_in(&keys, &history) {
                 Some(fix) if fix != word.shown => {
                     let action = if punct {
                         match replace(&word.shown, &fix) {
@@ -340,7 +364,7 @@ impl<C: Corrector> Engine<C> {
                     self.committed = self.committed + fix.chars().count() - shown_len;
                     self.prev_word = Some(self.word_showing(&fix));
                     self.context = (!punct).then(|| fix.clone());
-                    self.last = Some(LastCorrection { original: word, corrected: fix, context, delimiter, delimiter_removed: false });
+                    self.last = Some(LastCorrection { original: word, corrected: fix, context, earlier, delimiter, delimiter_removed: false });
                     self.decision = Decision::Corrected;
                     return action;
                 }
@@ -366,6 +390,7 @@ impl<C: Corrector> Engine<C> {
         }
         self.just_undone = Some(last.original.keys.clone());
         self.context = last.context.clone();
+        self.earlier = last.earlier.clone();
         if last.delimiter_removed {
             // The fixed word is on screen, resumed, with no delimiter.
             let action = replace(&last.corrected, &last.original.shown);
@@ -379,6 +404,7 @@ impl<C: Corrector> Engine<C> {
         self.committed = (self.committed + original).saturating_sub(fixed);
         // The delimiter stays; a Backspace over it resumes the original word.
         self.context = (d == ' ').then(|| last.original.shown.clone());
+        self.earlier = if d == ' ' { remember(&last.earlier, last.context.as_deref()) } else { Vec::new() };
         self.prev_word = Some(last.original);
         action
     }
@@ -406,6 +432,7 @@ impl<C: Corrector> Engine<C> {
         // Deleting the boundary space: resume the previous word if we know
         // it, otherwise we are now editing text we never saw.
         self.context = None; // the word before the resumed one is unknown
+        self.earlier.clear();
         match self.prev_word.take() {
             Some(prev) => {
                 self.committed = self.committed.saturating_sub(prev.shown.chars().count() + 1);

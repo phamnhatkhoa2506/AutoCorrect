@@ -61,6 +61,8 @@ struct Word {
     text: String,
     keys: String,
     prev: Option<String>,
+    /// The words before this one, up to three, oldest first (`prev` is the last).
+    history: Vec<String>,
     /// Written with a capital first letter (names, sentence starts).
     capital: bool,
 }
@@ -92,7 +94,8 @@ fn words(sentence: &str, language: Language) -> Vec<Word> {
     let mut out: Vec<Word> = Vec::new();
     let mut prev: Option<String> = None;
     let mut run = String::new();
-    let finish = |run: &mut String, prev: &mut Option<String>, out: &mut Vec<Word>| {
+    let mut history: Vec<String> = Vec::new();
+    let finish = |run: &mut String, prev: &mut Option<String>, history: &mut Vec<String>, out: &mut Vec<Word>| {
         if run.is_empty() {
             return;
         }
@@ -106,23 +109,31 @@ fn words(sentence: &str, language: Language) -> Vec<Word> {
         match text {
             Some(text) => {
                 let keys = if language == Language::Vietnamese { to_keys(&text) } else { text.clone() };
-                out.push(Word { text: text.clone(), keys, prev: prev.take(), capital });
+                out.push(Word { text: text.clone(), keys, prev: prev.take(), history: history.clone(), capital });
+                history.push(text.clone());
+                if history.len() > 3 {
+                    history.remove(0);
+                }
                 *prev = Some(text);
             }
-            None => *prev = None,
+            None => {
+                *prev = None;
+                history.clear();
+            }
         }
     };
     for c in sentence.chars() {
         if c.is_alphabetic() {
             run.push(c);
         } else {
-            finish(&mut run, &mut prev, &mut out);
+            finish(&mut run, &mut prev, &mut history, &mut out);
             if !c.is_whitespace() {
                 prev = None;
+                history.clear();
             }
         }
     }
-    finish(&mut run, &mut prev, &mut out);
+    finish(&mut run, &mut prev, &mut history, &mut out);
     out
 }
 
@@ -271,11 +282,12 @@ fn run(corrector: &SmartCorrector, cases: &[Case], show: usize) -> ((u32, u32), 
     let (mut one, mut two, mut stripped) = (Typos::default(), Typos::default(), Typos::default());
     for case in cases {
         let prev = case.word.prev.as_deref();
+        let history: Vec<&str> = case.word.history.iter().map(String::as_str).collect();
         match &case.typed {
             None => {
                 clean += 1;
                 let keys = typed_as(&case.word.keys, case.word.capital);
-                if let Some(fix) = corrector.correct_after(&keys, prev).filter(|fix| fix.to_lowercase() != case.word.text) {
+                if let Some(fix) = corrector.correct_in(&keys, &history).filter(|fix| fix.to_lowercase() != case.word.text) {
                     false_fix += 1;
                     if shown[0] < show {
                         shown[0] += 1;
@@ -293,7 +305,7 @@ fn run(corrector: &SmartCorrector, cases: &[Case], show: usize) -> ((u32, u32), 
                 };
                 tally.n += 1;
                 let typed_keys = typed_as(typed, case.word.capital);
-                match corrector.correct_after(&typed_keys, prev) {
+                match corrector.correct_in(&typed_keys, &history) {
                     Some(fix) if fix.to_lowercase() == case.word.text => tally.right += 1,
                     Some(fix) => {
                         tally.wrong += 1;
@@ -402,6 +414,7 @@ fn main() {
         far_ambiguity: flag("--far-ambiguity", d.far_ambiguity),
         bigram_weight: flag("--weight", d.bigram_weight),
         language_penalty: flag("--language", d.language_penalty),
+        phrase_decay: flag("--phrase", d.phrase_decay),
         restore_margin: flag("--restore-margin", d.restore_margin),
         restore_ambiguity: flag("--restore-ambiguity", d.restore_ambiguity),
         restore_english: flag("--restore-english", d.restore_english),
@@ -426,15 +439,40 @@ fn main() {
         ("Vietnamese", Language::Vietnamese, vec!["vie_news_2022_1M", "vie-vn_web_2015_1M"]),
         ("English", Language::English, vec!["eng_news_2023_1M"]),
     ];
-    for (name, language, dirs) in sets {
-        let mut all: Vec<Word> = Vec::new();
-        for dir in &dirs {
-            for sentence in held_out(&raw, dir, sentences / dirs.len() + 1) {
-                all.extend(words(&sentence, language));
+    let mut alls: Vec<Vec<Word>> = sets
+        .iter()
+        .map(|(_, language, dirs)| {
+            let mut all: Vec<Word> = Vec::new();
+            for dir in dirs {
+                for sentence in held_out(&raw, dir, sentences / dirs.len() + 1) {
+                    all.extend(words(&sentence, *language));
+                }
+            }
+            // Words under 3 keys are never corrected, so they say nothing here.
+            all.retain(|w| w.keys.len() >= 3);
+            all
+        })
+        .collect();
+    // Code-switching: with this probability the word before a word is one of
+    // the other language ("tôi dùng laptop mới"), as in real mixed typing.
+    let mixed = flag("--mixed", 0.0);
+    if mixed > 0.0 {
+        let pools: Vec<Vec<String>> = alls.iter().map(|all| all.iter().map(|w| w.text.clone()).collect()).collect();
+        let mut rng = Rng(seed.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1);
+        for (i, all) in alls.iter_mut().enumerate() {
+            let other = &pools[1 - i];
+            for word in all.iter_mut().filter(|w| w.prev.is_some()) {
+                if rng.chance(mixed) {
+                    let foreign = other[(rng.next() as usize) % other.len()].clone();
+                    word.prev = Some(foreign.clone());
+                    if let Some(last) = word.history.last_mut() {
+                        *last = foreign;
+                    }
+                }
             }
         }
-        // Words under 3 keys are never corrected, so they say nothing here.
-        all.retain(|w| w.keys.len() >= 3);
+    }
+    for ((name, language, _), all) in sets.into_iter().zip(alls) {
         let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
         let cases: Vec<Case> = all
             .iter()

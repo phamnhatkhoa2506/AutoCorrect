@@ -10,6 +10,13 @@ pub trait Corrector {
         self.correct(word)
     }
 
+    /// Like [`Corrector::correct_after`], knowing the last few finished
+    /// words (oldest first): the language of the phrase, not only of the
+    /// word before.
+    fn correct_in(&self, word: &str, history: &[&str]) -> Option<String> {
+        self.correct_after(word, history.last().copied())
+    }
+
     /// Which languages corrections may produce (input mode, per-app policy).
     fn set_languages(&mut self, _vietnamese: bool, _english: bool) {}
 

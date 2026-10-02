@@ -64,6 +64,10 @@ pub struct Tuning {
     /// Penalty for a candidate of the other language than the previous word
     /// (an English word after an English word is more likely English).
     pub language_penalty: f64,
+    /// How much the words before the previous one count towards the language
+    /// of the phrase: each step back counts this fraction of the one after
+    /// it. 0 looks at the previous word only.
+    pub phrase_decay: f64,
     /// A word typed without marks gets them only if the best accented form
     /// beats the bare word by this much (ln units: 5 is about 150 times as
     /// likely)...
@@ -88,6 +92,7 @@ impl Default for Tuning {
             far_ambiguity: 1.0,
             bigram_weight: 0.5,
             language_penalty: 3.0,
+            phrase_decay: 0.7,
             restore_margin: 5.0,
             restore_ambiguity: 1.5,
             restore_english: 8.0,
@@ -165,6 +170,9 @@ pub struct Ranking {
 struct Context {
     vi: Option<u32>,
     en: Option<u32>,
+    /// Which language the phrase leans to: -1 English only ... 1 Vietnamese
+    /// only, 0 undecided.
+    vote: f64,
 }
 
 impl SmartCorrector {
@@ -230,14 +238,26 @@ impl SmartCorrector {
         self.context = on;
     }
 
-    fn context_of(&self, prev: Option<&str>) -> Context {
-        match prev.filter(|_| self.context) {
-            Some(prev) => {
-                let prev = prev.to_lowercase();
-                Context { vi: self.vi.id(&prev), en: self.en.id(&prev) }
+    fn context_of(&self, history: &[&str]) -> Context {
+        let Some(prev) = history.last().filter(|_| self.context) else {
+            return Context::default();
+        };
+        let prev = prev.to_lowercase();
+        let mut ctx = Context { vi: self.vi.id(&prev), en: self.en.id(&prev), vote: 0.0 };
+        // The phrase's language: the previous word counts fully, each word
+        // before it a fraction less. Words in both languages say nothing.
+        let (mut weight, mut vote) = (1.0, 0.0);
+        for word in history.iter().rev().take(4) {
+            let word = word.to_lowercase();
+            match (self.vi.id(&word).is_some(), self.en.id(&word).is_some()) {
+                (true, false) => vote += weight,
+                (false, true) => vote -= weight,
+                _ => {}
             }
-            None => Context::default(),
+            weight *= self.tuning.phrase_decay;
         }
+        ctx.vote = vote.clamp(-1.0, 1.0);
+        ctx
     }
 
     /// ln frequency, raised when the previous word makes it likely.
@@ -255,10 +275,9 @@ impl SmartCorrector {
     /// Score change for a candidate that is only a word of the language the
     /// previous word is not in.
     fn language_bias(&self, ctx: Context, in_en: bool, in_vi: bool) -> f64 {
-        let prev_en_only = ctx.en.is_some() && ctx.vi.is_none();
-        let prev_vi_only = ctx.vi.is_some() && ctx.en.is_none();
-        if (prev_en_only && in_vi && !in_en) || (prev_vi_only && in_en && !in_vi) {
-            -self.tuning.language_penalty
+        let against = (ctx.vote < 0.0 && in_vi && !in_en) || (ctx.vote > 0.0 && in_en && !in_vi);
+        if against {
+            -self.tuning.language_penalty * ctx.vote.abs()
         } else {
             0.0
         }
@@ -295,7 +314,7 @@ impl SmartCorrector {
     /// accents), so its own frequency cannot tell it from a typo. Instead
     /// the accented forms with the same letters compete with it, the
     /// previous word as evidence, and one must win by a wide margin.
-    fn restore_marks(&self, word: &str, keys: &str, prev: Option<&str>) -> Option<String> {
+    fn restore_marks(&self, word: &str, keys: &str, history: &[&str]) -> Option<String> {
         // Typed without marks: the Telex keys changed nothing. (Not required
         // to be a valid syllable: "duoc" is not one, yet it is "được".)
         if compose(keys).text != keys {
@@ -313,7 +332,7 @@ impl SmartCorrector {
         if word.chars().next().is_some_and(char::is_uppercase) {
             return None;
         }
-        let ctx = self.context_of(prev);
+        let ctx = self.context_of(history);
         let score = |id: u32, f: f64| {
             let bigram = ctx.vi.and_then(|p| self.vi_bigrams.ln_prob(p, id));
             self.with_context(f, bigram)
@@ -425,9 +444,13 @@ impl SmartCorrector {
 
     /// Scores every correction of `word` (raw keys), for diagnostics.
     pub fn rank(&self, word: &str, prev: Option<&str>) -> Option<Ranking> {
+        self.rank_in(word, prev.as_slice())
+    }
+
+    pub fn rank_in(&self, word: &str, history: &[&str]) -> Option<Ranking> {
         let keys = Self::keys_of(word)?;
         let (typed, vietnamese) = self.typed(&keys);
-        let ctx = self.context_of(prev);
+        let ctx = self.context_of(history);
         let mut candidates = self.candidates(&keys, vietnamese, ctx);
         let t = &self.tuning;
         if confident(&candidates, typed, t.margin, t.floor, t.ambiguity).is_none() && typed == f64::NEG_INFINITY && keys.len() >= FAR_MIN_KEYS {
@@ -466,6 +489,10 @@ impl Corrector for SmartCorrector {
     }
 
     fn correct_after(&self, word: &str, prev: Option<&str>) -> Option<String> {
+        self.correct_in(word, prev.as_slice())
+    }
+
+    fn correct_in(&self, word: &str, history: &[&str]) -> Option<String> {
         // The user's own dictionary comes first, for words of any length.
         let lower = word.to_lowercase();
         if let Some(instead) = self.personal.fix(&lower) {
@@ -481,7 +508,7 @@ impl Corrector for SmartCorrector {
             }
         }
         if self.vietnamese && self.restore {
-            if let Some(fix) = self.restore_marks(word, &keys, prev) {
+            if let Some(fix) = self.restore_marks(word, &keys, history) {
                 return Some(fix);
             }
         }
@@ -495,10 +522,10 @@ impl Corrector for SmartCorrector {
         // unknown one in the middle of a sentence ("Wolff", after a word).
         // Only a capitalised unknown word that starts a phrase can be a typo.
         let capitalised = word.chars().next().is_some_and(char::is_uppercase);
-        if capitalised && (typed > f64::NEG_INFINITY || prev.is_some()) {
+        if capitalised && (typed > f64::NEG_INFINITY || !history.is_empty()) {
             return None;
         }
-        let ctx = self.context_of(prev);
+        let ctx = self.context_of(history);
         // Rare entries are often misspellings that leaked into the corpora.
         let typed_penalised = typed - self.tuning.rare_typed_penalty;
 
@@ -638,6 +665,19 @@ mod tests {
         assert!(c.correct_after("launh", None).is_some_and(|fix| !fix.is_ascii() || fix == "anh"));
         assert_eq!(c.correct_after("launh", Some("pioneering")), None);
         assert_ne!(c.correct_after("ays", Some("three")).as_deref(), Some("ấy"));
+    }
+
+    /// An English word in the middle of Vietnamese text does not turn the
+    /// phrase English: the words before it still count, less each step back.
+    #[test]
+    fn phrase_language_weighs_earlier_words() {
+        let c = corrector();
+        let alone = c.context_of(&["pioneering"]).vote;
+        let in_phrase = c.context_of(&["nhanh", "pioneering"]).vote;
+        assert_eq!(alone, -1.0);
+        assert!(in_phrase > alone && in_phrase < 0.0, "{in_phrase}");
+        // Without earlier words it is the previous word alone, as before.
+        assert_eq!(c.correct_in("launh", &["pioneering"]), c.correct_after("launh", Some("pioneering")));
     }
 
     /// Prints decisions for a word list: `cargo test -p ac-core explore -- --ignored --nocapture`
