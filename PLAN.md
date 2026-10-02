@@ -180,7 +180,7 @@ Chính sách mặc định theo app:
 - **Autocorrect riêng của từng app sẽ "sửa ngược" kết quả của mình.** Notepad trên Win11 đổi `dùng` thành `dung`, kể cả khi autocorrect của Windows đã tắt. Hướng xử lý:
   - Lập danh sách các app có autocorrect riêng (Notepad, Word, Outlook...) và hướng dẫn người dùng tắt.
   - Phát hiện khi chữ bị đổi lại sau khi mình sửa (đọc lại qua UI Automation), rồi cảnh báo hoặc tự tắt sửa trong app đó.
-- **Hoàn tác bằng Backspace dễ bị kích hoạt nhầm** (người dùng bấm Backspace để xóa tiếp). Cách xử lý: một lần hoàn tác chỉ giữ nguyên từ ngay lúc đó; phải hoàn tác 2 lần thì mới bỏ qua từ đó cả phiên.
+- **Hoàn tác không được dùng Backspace**: lùi bằng Backspace để sửa chữ cũ là thao tác thường xuyên nhất, và cả "một Backspace" lẫn "hai Backspace" đều đụng vào nó. Hoàn tác là **Ctrl+Z**, chỉ bị app bắt khi vừa có một bản sửa chờ (chưa gõ phím nào khác); lúc khác Ctrl+Z đi thẳng vào app. Phải nhả Ctrl khi gửi phím thay thế, nếu không Backspace thành Ctrl+Backspace. Một từ bị hoàn tác 2 lần thì bỏ qua cả phiên.
 - **Backspace lùi qua dấu cách vào từ trước**: phải khôi phục từ trước vào buffer. Nếu lùi vào đoạn chữ không biết thì đánh dấu `Untracked` và không sửa, vì buffer có thể chỉ chứa phần đuôi của từ trên màn hình (`xteh` có thể bị sửa thành `xthe`).
 - **Sự kiện foreground của WinEvent có thể đến sai thứ tự** (bấm taskbar báo `explorer.exe` sau app thật): hook tự phân loại lại cửa sổ thật mỗi khi foreground đổi.
 - **"Hiện mật khẩu" biến ô mật khẩu thành ô chữ thường**: nhớ các ô từng bị che (process + AutomationId + tên) và nhận diện theo nhãn (password, pwd, mật khẩu…).

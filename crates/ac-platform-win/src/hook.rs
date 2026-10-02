@@ -189,15 +189,15 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let action = state.engine.on_key(key);
         if state.settings.journal && matches!(action, Action::Replace { .. } | Action::ReplaceThenPass { .. }) {
             let entry = match key {
-                Key::Space | Key::Punct => state.engine.last_correction().map(|(k, f)| ("FIX", k.to_string(), f.to_string())),
-                Key::Backspace => pending.map(|(k, f)| ("UNDO", k, f)),
+                Key::Space | Key::Punct(_) => state.engine.last_correction().map(|(k, f)| ("FIX", k.to_string(), f.to_string())),
+                Key::Undo => pending.map(|(k, f)| ("UNDO", k, f)),
                 _ => None,
             };
             if let Some((kind, keys, fix)) = entry {
                 log::journal(format!("{kind}\t{keys}\t{fix}\t{}", context.as_deref().unwrap_or("")));
             }
         }
-        if matches!(key, Key::Space | Key::Punct) && log::debug_enabled() {
+        if matches!(key, Key::Space | Key::Punct(_)) && log::debug_enabled() {
             let decision = state.engine.last_decision();
             let mut line = format!("  word on Space: {before:?} (keys {keys:?}, after {context:?}) -> {decision:?}");
             if decision == Decision::NoCandidate {
@@ -221,8 +221,8 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         return false;
     };
     let kind = match key {
-        Key::Backspace => JobKind::Undo,
-        Key::Space | Key::Punct => JobKind::Fix,
+        Key::Undo => JobKind::Undo,
+        Key::Space | Key::Punct(_) => JobKind::Fix,
         _ => JobKind::Compose,
     };
     inject::run(Job {
@@ -232,6 +232,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         backspaces,
         text,
         hwnd: foreground.0 as isize,
+        held_ctrl: (key == Key::Undo).then(|| if is_down(VK_LCONTROL) { VK_LCONTROL } else { VK_RCONTROL }),
     });
     swallow
 }
@@ -278,6 +279,9 @@ unsafe fn decode(kb: &KBDLLHOOKSTRUCT) -> Option<Key> {
     if !alt && is_down(VK_CONTROL) && vk.0 == 0x41 {
         return Some(Key::SelectAll);
     }
+    if !alt && !is_down(VK_SHIFT) && !is_down(VK_LWIN) && !is_down(VK_RWIN) && is_down(VK_CONTROL) && vk.0 == 0x5A {
+        return Some(Key::Undo);
+    }
     if alt || is_down(VK_CONTROL) || is_down(VK_LWIN) || is_down(VK_RWIN) {
         return Some(Key::Reset); // shortcut: text may change unpredictably
     }
@@ -294,9 +298,11 @@ unsafe fn decode(kb: &KBDLLHOOKSTRUCT) -> Option<Key> {
             Key::Char(if shift ^ caps { c } else { c.to_ascii_lowercase() })
         }
         // Punctuation that ends a word, on a US layout: , . ; : ? and !
-        VIRTUAL_KEY(0xBC | 0xBE) if !shift => Key::Punct,
-        VIRTUAL_KEY(0xBA) => Key::Punct,
-        VIRTUAL_KEY(0xBF | 0x31) if shift => Key::Punct,
+        VIRTUAL_KEY(0xBC) if !shift => Key::Punct(','),
+        VIRTUAL_KEY(0xBE) if !shift => Key::Punct('.'),
+        VIRTUAL_KEY(0xBA) => Key::Punct(if shift { ':' } else { ';' }),
+        VIRTUAL_KEY(0xBF) if shift => Key::Punct('?'),
+        VIRTUAL_KEY(0x31) if shift => Key::Punct('!'),
         VIRTUAL_KEY(v @ 0x30..=0x39) if !shift => Key::Char(v as u8 as char),
         // Enter, Tab, punctuation, arrows, Home/End, Delete, F-keys...
         _ => Key::Reset,

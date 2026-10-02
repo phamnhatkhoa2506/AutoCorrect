@@ -37,11 +37,18 @@ pub struct Job {
     pub backspaces: usize,
     pub text: String,
     pub hwnd: isize,
+    /// A Control key the user is holding (Ctrl+Z): released while the keys
+    /// go out, otherwise every Backspace would act as Ctrl+Backspace.
+    pub held_ctrl: Option<VIRTUAL_KEY>,
 }
 
 /// Sends the replacement now and reports it to the log thread.
 pub fn run(job: Job) {
-    let inputs = build_inputs(job.backspaces, &job.text);
+    let mut inputs = build_inputs(job.backspaces, &job.text);
+    if let Some(ctrl) = job.held_ctrl {
+        inputs.insert(0, key_event(ctrl, true));
+        inputs.push(key_event(ctrl, false));
+    }
     let send_start = Instant::now();
     let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
     log::send(Event {
@@ -72,6 +79,22 @@ fn build_inputs(backspaces: usize, text: &str) -> Vec<INPUT> {
         }
     }
     inputs
+}
+
+/// A single key event (down or up), tagged as ours.
+fn key_event(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                time: 0,
+                dwExtraInfo: INJECTED_TAG,
+            },
+        },
+    }
 }
 
 fn push_key(inputs: &mut Vec<INPUT>, vk: VIRTUAL_KEY, scan: u16, flags: KEYBD_EVENT_FLAGS) {

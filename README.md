@@ -62,8 +62,8 @@ cargo run -p ac-data --release
 | `mooir ` | `mỗi ` | nhầm hỏi/ngã |
 | `git `, `npm `, `cargo `, `Tuan ` | giữ nguyên | chữ có thật / tên riêng / lệnh |
 | `teh,` / `teh.` / `teh;` | `the,` / `the.` / `the;` | dấu câu cũng là ranh giới từ (phím dấu vẫn đi tiếp bình thường) |
-| `teh ` rồi Backspace | `the` (chỉ xóa dấu cách) | để gõ tiếp dấu phẩy ngay sau chữ |
-| `teh ` rồi Backspace **hai lần** liền | quay về `teh` | hoàn tác bản sửa |
+| `teh ` rồi Backspace | `the` (chỉ xóa dấu cách) | để gõ tiếp dấu phẩy ngay sau chữ; Backspace chỉ là Backspace, lùi bao nhiêu lần cũng được |
+| `teh ` rồi **Ctrl+Z** | `teh ` | hoàn tác bản sửa (giữ dấu cách/dấu phẩy); chỉ có tác dụng ngay sau khi app vừa sửa, các lúc khác Ctrl+Z là của chính app |
 | `te`, click chuột chỗ khác, gõ `h ` | không sửa | buffer đã reset |
 
 Thử trong: Notepad, Windows Terminal (PowerShell), VS Code, Chrome, Zalo/Messenger, Word.
