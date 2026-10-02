@@ -45,6 +45,7 @@ version = "0.1.0"
 dependencies = [
  "ac-config",
  "ac-core",
+ "ac-telex",
  "windows",
 ]
 

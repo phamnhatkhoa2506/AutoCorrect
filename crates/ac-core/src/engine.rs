@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ac_telex::{compose, to_keys};
+use ac_telex::Method;
 
 use crate::Corrector;
 
@@ -83,8 +83,10 @@ pub enum Decision {
 
 pub struct Engine<C: Corrector> {
     corrector: C,
-    /// Vietnamese mode: letters are composed with Telex as they are typed.
+    /// Vietnamese mode: letters are composed as they are typed.
     vietnamese: bool,
+    /// Telex or VNI.
+    method: Method,
     /// Which languages typos are corrected in (user setting, app policy).
     correct_vietnamese: bool,
     correct_english: bool,
@@ -124,6 +126,7 @@ impl<C: Corrector> Engine<C> {
         Self {
             corrector,
             vietnamese: false,
+            method: Method::Telex,
             correct_vietnamese: true,
             correct_english: true,
             word: Word::default(),
@@ -150,6 +153,14 @@ impl<C: Corrector> Engine<C> {
         self.vietnamese = on;
         self.sync_corrector();
         self.on_key(Key::Reset);
+    }
+
+    /// Switches between Telex and VNI; forgets the word being typed.
+    pub fn set_method(&mut self, method: Method) {
+        if self.method != method {
+            self.method = method;
+            self.on_key(Key::Reset);
+        }
     }
 
     /// Languages typos may be corrected in. Vietnamese corrections also need
@@ -268,7 +279,7 @@ impl<C: Corrector> Engine<C> {
             self.word.literal |= self.observing;
             return Action::Pass;
         }
-        let composed = compose(&self.word.keys).text;
+        let composed = self.method.compose(&self.word.keys).text;
         let as_typed = self.word.shown.chars().chain([c]).eq(composed.chars());
         let action = if as_typed { Action::Pass } else { replace(&self.word.shown, &composed) };
         self.word.shown = composed;
@@ -278,8 +289,8 @@ impl<C: Corrector> Engine<C> {
     /// The word whose screen text is `text`, with keys that recompose to it.
     fn word_showing(&self, text: &str) -> Word {
         if self.vietnamese {
-            let keys = to_keys(text);
-            if compose(&keys).text == text {
+            let keys = self.method.keys_for(text);
+            if self.method.compose(&keys).text == text {
                 return Word { keys, shown: text.to_string(), literal: false };
             }
         }
@@ -315,7 +326,8 @@ impl<C: Corrector> Engine<C> {
         } else if undos >= IGNORE_AFTER_UNDOS {
             Decision::IgnoredAfterUndos(undos)
         } else {
-            match self.corrector.correct_after(&word.keys, context.as_deref()) {
+            let keys = self.method.telex_keys(&word.keys);
+            match self.corrector.correct_after(&keys, context.as_deref()) {
                 Some(fix) if fix != word.shown => {
                     let action = if punct {
                         match replace(&word.shown, &fix) {
@@ -725,6 +737,27 @@ mod tests {
         );
         assert_eq!(e.current_word(), "việt");
         assert_eq!(e.current_keys(), "vieetj");
+    }
+
+    #[test]
+    fn composes_vni_while_typing() {
+        let mut e = vn_engine();
+        e.set_method(Method::Vni);
+        press(&mut e, "Vie6t5");
+        assert_eq!(e.current_word(), "Việt");
+        assert_eq!(e.current_keys(), "Vie6t5");
+        // Digits that act on nothing stay digits.
+        let mut e = vn_engine();
+        e.set_method(Method::Vni);
+        press(&mut e, "mp3");
+        assert_eq!(e.current_word(), "mp3");
+        // Backspace into the finished word recomposes it with VNI keys.
+        let mut e = vn_engine();
+        e.set_method(Method::Vni);
+        press(&mut e, "to6i");
+        e.on_key(Key::Space);
+        e.on_key(Key::Backspace);
+        assert_eq!(e.current_keys(), "to6i");
     }
 
     #[test]

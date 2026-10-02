@@ -5,6 +5,30 @@ use std::fs;
 use crate::hotkey::Hotkey;
 use crate::paths::settings_path;
 
+/// How Vietnamese is typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMethod {
+    Telex,
+    Vni,
+}
+
+impl InputMethod {
+    pub fn name(self) -> &'static str {
+        match self {
+            InputMethod::Telex => "telex",
+            InputMethod::Vni => "vni",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim() {
+            "telex" => Some(InputMethod::Telex),
+            "vni" => Some(InputMethod::Vni),
+            _ => None,
+        }
+    }
+}
+
 /// How readily the corrector changes what was typed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Strength {
@@ -63,6 +87,7 @@ pub struct Settings {
     /// Switches between Vietnamese and English.
     pub hotkey: Hotkey,
     pub strength: Strength,
+    pub input: InputMethod,
 }
 
 impl Default for Settings {
@@ -77,6 +102,7 @@ impl Default for Settings {
             restore_marks: true,
             hotkey: Hotkey::ALT_Z,
             strength: Strength::Balanced,
+            input: InputMethod::Telex,
         }
     }
 }
@@ -98,6 +124,7 @@ impl Settings {
                 "restore_marks" => s.restore_marks = on,
                 "hotkey" => s.hotkey = Hotkey::parse(value).unwrap_or(s.hotkey),
                 "strength" => s.strength = Strength::from_name(value).unwrap_or(s.strength),
+                "input" => s.input = InputMethod::from_name(value).unwrap_or(s.input),
                 _ => {}
             }
         }
@@ -107,7 +134,7 @@ impl Settings {
     pub fn to_ini(&self) -> String {
         let flag = |b: bool| u8::from(b);
         format!(
-            "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\nhotkey={}\nstrength={}\n",
+            "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\nhotkey={}\nstrength={}\ninput={}\n",
             flag(self.vietnamese),
             flag(self.corrections),
             flag(self.paused),
@@ -117,6 +144,7 @@ impl Settings {
             flag(self.restore_marks),
             self.hotkey,
             self.strength.name(),
+            self.input.name(),
         )
     }
 }

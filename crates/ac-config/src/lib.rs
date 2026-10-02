@@ -10,4 +10,4 @@ pub mod settings;
 
 pub use apps::{AppKind, Apps};
 pub use hotkey::{Detector, Hotkey, Outcome};
-pub use settings::{Settings, Strength};
+pub use settings::{InputMethod, Settings, Strength};

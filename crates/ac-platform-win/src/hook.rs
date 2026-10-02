@@ -2,10 +2,12 @@
 //! Windows silently removes a hook that exceeds `LowLevelHooksTimeout`.
 
 use std::cell::{Cell, RefCell};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
 use ac_core::{Action, Bigrams, Decision, Engine, Key, Lexicon, Personal, SmartCorrector};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LCONTROL,
     VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_PACKET, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
@@ -48,6 +50,10 @@ impl State {
     /// Pushes the settings and the foreground app's policy into the engine.
     fn apply(&mut self) {
         let s = self.settings;
+        self.engine.set_method(match s.input {
+            ac_config::InputMethod::Telex => ac_telex::Method::Telex,
+            ac_config::InputMethod::Vni => ac_telex::Method::Vni,
+        });
         self.engine.set_vietnamese(s.vietnamese);
         // English corrections would mangle commands and code, unless the user
         // asked for them there (chat panels of an IDE are plain text).
@@ -203,11 +209,25 @@ pub fn set_app(name: &str) {
     }
 }
 
+/// Tick count (ms) of the last event either hook saw. Windows removes a
+/// low-level hook without a word when a callback was too slow; the watchdog
+/// compares this with the system's last-input time to notice.
+static LAST_SEEN: AtomicU32 = AtomicU32::new(0);
+
+pub fn mark_seen() {
+    LAST_SEEN.store(unsafe { GetTickCount() }, Ordering::Relaxed);
+}
+
+pub fn last_seen() -> u32 {
+    LAST_SEEN.load(Ordering::Relaxed)
+}
+
 /// # Safety
 /// Windows calls this as a low-level keyboard hook: `lparam` must point to a
 /// valid `KBDLLHOOKSTRUCT`.
 pub unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
+        mark_seen();
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
         let msg = wparam.0 as u32;
         let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
@@ -228,6 +248,9 @@ pub unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: L
 /// # Safety
 /// Windows calls this as a low-level mouse hook, with the arguments it defines.
 pub unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 {
+        mark_seen();
+    }
     if code == HC_ACTION as i32
         && matches!(wparam.0 as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN)
     {

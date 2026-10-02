@@ -5,7 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use ac_config::apps::AppKind;
-use ac_config::{personal, settings, Apps, Hotkey, Settings, Strength};
+use ac_config::{personal, settings, Apps, Hotkey, InputMethod, Settings, Strength};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
@@ -20,6 +20,7 @@ struct Options {
     restore_marks: bool,
     hotkey: String,
     strength: String,
+    input: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -71,6 +72,7 @@ fn options_of(s: &Settings) -> Options {
         restore_marks: s.restore_marks,
         hotkey: s.hotkey.to_string(),
         strength: s.strength.name().to_string(),
+        input: s.input.name().to_string(),
     }
 }
 
@@ -164,6 +166,7 @@ fn save_options(options: Options) -> Result<(), String> {
     s.restore_marks = options.restore_marks;
     s.hotkey = Hotkey::parse(&options.hotkey).ok_or("Phím tắt không hợp lệ")?;
     s.strength = Strength::from_name(&options.strength).unwrap_or(s.strength);
+    s.input = InputMethod::from_name(&options.input).unwrap_or(s.input);
     settings::save(&s);
     Ok(())
 }

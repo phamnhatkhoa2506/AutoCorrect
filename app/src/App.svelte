@@ -219,6 +219,13 @@
           </div>
         </section>
         <section>
+          <h3>Kiểu gõ</h3>
+          <label><input type="radio" name="input" value="telex" bind:group={options.input} onchange={saveOptions} />
+            <span>Telex <small>aa â, ow ơ, dd đ; s f r x j là dấu</small></span></label>
+          <label><input type="radio" name="input" value="vni" bind:group={options.input} onchange={saveOptions} />
+            <span>VNI <small>a6 â, o7 ơ, d9 đ; 1 2 3 4 5 là dấu</small></span></label>
+        </section>
+        <section>
           <h3>Tuỳ chọn</h3>
           <label><input type="checkbox" bind:checked={options.corrections} onchange={saveOptions} />
             <span>Tự sửa lỗi gõ khi nhấn Space
