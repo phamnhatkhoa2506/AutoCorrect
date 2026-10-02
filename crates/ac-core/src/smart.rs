@@ -38,7 +38,11 @@ const MIN_KEYS: usize = 3;
 pub struct SmartCorrector {
     vi: Lexicon,
     en: Lexicon,
+    /// Read keys as Telex and propose Vietnamese corrections.
     vietnamese: bool,
+    /// Propose English corrections. English words still count as known
+    /// when off, so "git" is never "fixed" into Vietnamese.
+    english: bool,
 }
 
 /// Scores behind a decision, for diagnostics.
@@ -52,13 +56,13 @@ pub struct Ranking {
 
 impl SmartCorrector {
     pub fn new(vi: Lexicon, en: Lexicon) -> Self {
-        Self { vi, en, vietnamese: true }
+        Self { vi, en, vietnamese: true, english: true }
     }
 
     /// Best known reading per text of a key sequence: (text, ln frequency).
-    fn readings(&self, keys: &str) -> Vec<(String, f64)> {
+    fn readings(&self, keys: &str, english: bool) -> Vec<(String, f64)> {
         let mut out = Vec::with_capacity(2);
-        if let Some(f) = self.en.log_freq(keys) {
+        if let Some(f) = self.en.log_freq(keys).filter(|_| english) {
             out.push((keys.to_string(), f));
         }
         if let Some(text) = self.vietnamese_text(keys) {
@@ -88,7 +92,7 @@ impl SmartCorrector {
     fn typed(&self, keys: &str) -> (f64, Option<String>) {
         let vietnamese = self.vietnamese_text(keys);
         let score = self
-            .readings(keys)
+            .readings(keys, true)
             .into_iter()
             .map(|(_, f)| f)
             .chain(vietnamese.as_ref().map(|_| UNSEEN_SYLLABLE))
@@ -109,7 +113,7 @@ impl SmartCorrector {
         // Several slips can lead to the same word: their probabilities add up.
         let mut scores: HashMap<String, f64> = HashMap::new();
         for slip in edits1(keys).into_iter().filter(|s| s.marks_only || required.is_none()) {
-            for (text, f) in self.readings(&slip.keys) {
+            for (text, f) in self.readings(&slip.keys, self.english) {
                 if typed_texts.contains(&text) || required.as_ref().is_some_and(|r| !same_word(r, &skeleton(&text))) {
                     continue;
                 }
@@ -131,9 +135,9 @@ impl SmartCorrector {
 }
 
 impl Corrector for SmartCorrector {
-    /// With Vietnamese off, only English corrections are proposed.
-    fn set_vietnamese(&mut self, on: bool) {
-        self.vietnamese = on;
+    fn set_languages(&mut self, vietnamese: bool, english: bool) {
+        self.vietnamese = vietnamese;
+        self.english = english;
     }
 
     fn correct(&self, word: &str) -> Option<String> {
@@ -298,9 +302,23 @@ mod tests {
     #[test]
     fn english_only_mode_skips_vietnamese() {
         let mut c = corrector();
-        c.set_vietnamese(false);
+        c.set_languages(false, true);
         assert_eq!(c.correct("dunhf"), None);
         assert_eq!(c.correct("teh").as_deref(), Some("the"));
+    }
+
+    /// Terminals and IDEs: commands and code look like English, so only
+    /// Vietnamese is corrected there, and English words still count as known.
+    #[test]
+    fn vietnamese_only_mode_for_code() {
+        let mut c = corrector();
+        c.set_languages(true, false);
+        // ("teh" would still become "the": that is also a Vietnamese word.)
+        assert_eq!(c.correct("recieve"), None);
+        assert_eq!(c.correct("waht"), None);
+        assert_eq!(c.correct("dunhf").as_deref(), Some("dùng"));
+        assert_eq!(c.correct("git"), None);
+        assert_eq!(c.correct("cargo"), None);
     }
 
     #[test]

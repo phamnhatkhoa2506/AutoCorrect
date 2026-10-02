@@ -59,12 +59,17 @@ pub enum Decision {
     /// Backspace reached text we never saw, so the buffer may hold only the
     /// tail of the on-screen word: correcting it could corrupt the text.
     Untracked,
+    /// Corrections are off (user setting or app policy).
+    Disabled,
 }
 
 pub struct Engine<C: Corrector> {
     corrector: C,
     /// Vietnamese mode: letters are composed with Telex as they are typed.
     vietnamese: bool,
+    /// Which languages typos are corrected in (user setting, app policy).
+    correct_vietnamese: bool,
+    correct_english: bool,
     word: Word,
     /// The previous word, followed on screen by one space. Lets a Backspace
     /// over that space resume editing the word.
@@ -86,6 +91,8 @@ impl<C: Corrector> Engine<C> {
         Self {
             corrector,
             vietnamese: false,
+            correct_vietnamese: true,
+            correct_english: true,
             word: Word::default(),
             prev_word: None,
             untracked: false,
@@ -98,8 +105,25 @@ impl<C: Corrector> Engine<C> {
 
     pub fn set_vietnamese(&mut self, on: bool) {
         self.vietnamese = on;
-        self.corrector.set_vietnamese(on);
+        self.sync_corrector();
         self.on_key(Key::Reset);
+    }
+
+    /// Languages typos may be corrected in. Vietnamese corrections also need
+    /// Vietnamese mode, since they read the keys as Telex.
+    pub fn set_corrections(&mut self, vietnamese: bool, english: bool) {
+        self.correct_vietnamese = vietnamese;
+        self.correct_english = english;
+        self.sync_corrector();
+    }
+
+    fn sync_corrector(&mut self) {
+        let vietnamese = self.vietnamese && self.correct_vietnamese;
+        self.corrector.set_languages(vietnamese, self.correct_english);
+    }
+
+    fn corrections_on(&self) -> bool {
+        (self.vietnamese && self.correct_vietnamese) || self.correct_english
     }
 
     pub fn is_vietnamese(&self) -> bool {
@@ -182,6 +206,8 @@ impl<C: Corrector> Engine<C> {
 
         self.decision = if word.keys.is_empty() {
             Decision::EmptyWord
+        } else if !self.corrections_on() {
+            Decision::Disabled
         } else if untracked {
             Decision::Untracked
         } else if just_undone {
@@ -493,6 +519,17 @@ mod tests {
         assert_eq!(e.current_keys(), "vieetj");
         assert_eq!(press(&mut e, "s"), [rep(2, "ết")]);
         assert_eq!(e.current_word(), "viết");
+    }
+
+    #[test]
+    fn corrections_can_be_turned_off() {
+        let mut e = vn_engine();
+        e.set_corrections(false, false);
+        press(&mut e, "dunhf");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
+        assert_eq!(e.last_decision(), Decision::Disabled);
+        // Telex composition is unaffected.
+        assert_eq!(press(&mut e, "aa"), [Action::Pass, rep(1, "â")]);
     }
 
     #[test]

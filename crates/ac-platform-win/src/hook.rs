@@ -16,18 +16,41 @@ use windows::Win32::UI::WindowsAndMessaging::{
     LLKHF_INJECTED, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN,
 };
 
+use crate::focus;
 use crate::inject::{self, Job, JobKind, INJECTED_TAG};
 use crate::log;
+use crate::policy::AppKind;
+use crate::settings::Settings;
+use crate::tray;
 
 struct State {
     engine: Engine<SmartCorrector>,
     foreground: HWND,
+    settings: Settings,
+    app: AppKind,
+}
+
+impl State {
+    /// Pushes the settings and the foreground app's policy into the engine.
+    fn apply(&mut self) {
+        let s = self.settings;
+        self.engine.set_vietnamese(s.vietnamese);
+        // English corrections would mangle commands and code.
+        self.engine.set_corrections(s.corrections, s.corrections && self.app == AppKind::Normal);
+    }
+
+    /// Keys must pass through untouched and nothing may be remembered.
+    fn hands_off(&self) -> bool {
+        self.settings.paused || self.app == AppKind::Off || focus::blocked()
+    }
 }
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State {
         engine: Engine::new(corrector()),
         foreground: HWND::default(),
+        settings: Settings::default(),
+        app: AppKind::Normal,
     });
 }
 
@@ -38,10 +61,50 @@ fn corrector() -> SmartCorrector {
     )
 }
 
-/// Builds the engine (parses the lexicons) now, on the hook thread, instead
-/// of on the first key press.
-pub fn init() {
-    STATE.with(|_| {});
+/// Builds the engine (parses the lexicons) on the hook thread and applies
+/// the saved settings.
+pub fn init(settings: Settings) {
+    STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        state.settings = settings;
+        state.apply();
+    });
+}
+
+pub fn settings() -> Settings {
+    STATE.with(|cell| cell.borrow().settings)
+}
+
+/// Changes the settings (tray menu, Alt+Z). Saving and redrawing the icon
+/// happen later on the tray window, never inside the hook.
+pub fn update(change: impl FnOnce(&mut Settings)) {
+    let s = STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        change(&mut state.settings);
+        state.apply();
+        state.settings
+    });
+    tray::changed();
+    log::info(format!(
+        "mode: {}, corrections {}{}",
+        if s.vietnamese { "Vietnamese (Telex)" } else { "English" },
+        if s.corrections { "on" } else { "off" },
+        if s.paused { ", PAUSED" } else { "" },
+    ));
+}
+
+/// The foreground program changed (from the WinEvent hook).
+pub fn set_app(kind: AppKind, name: &str) {
+    STATE.with(|cell| {
+        let Ok(mut state) = cell.try_borrow_mut() else { return };
+        if state.app != kind {
+            state.app = kind;
+            state.apply();
+        }
+    });
+    if log::debug_enabled() {
+        log::debug(format!("foreground: {name} -> {kind:?}"));
+    }
 }
 
 pub unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -72,8 +135,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
     let started = Instant::now();
     // Alt+Z switches Vietnamese/English, like Unikey's default.
     if kb.vkCode == u32::from(b'Z') && kb.flags.0 & LLKHF_ALTDOWN.0 != 0 {
-        let on = !STATE.with(|cell| cell.borrow().engine.is_vietnamese());
-        set_vietnamese(on);
+        update(|s| s.vietnamese = !s.vietnamese);
         return true;
     }
     let decoded = decode(kb);
@@ -97,6 +159,11 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let Ok(mut state) = cell.try_borrow_mut() else {
             return None;
         };
+        if state.hands_off() {
+            // Password field, paused, or a hands-off app: keep nothing.
+            state.engine.on_key(Key::Reset);
+            return None;
+        }
         if state.foreground != foreground {
             state.foreground = foreground;
             state.engine.on_key(Key::Reset);
@@ -139,11 +206,6 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         hwnd: foreground.0 as isize,
     });
     true
-}
-
-pub fn set_vietnamese(on: bool) {
-    STATE.with(|cell| cell.borrow_mut().engine.set_vietnamese(on));
-    log::info(format!("mode: {}", if on { "Vietnamese (Telex)" } else { "English" }));
 }
 
 fn with_engine(f: impl FnOnce(&mut Engine<SmartCorrector>) -> Action) {

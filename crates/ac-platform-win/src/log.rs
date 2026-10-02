@@ -7,13 +7,7 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
-use windows::core::PWSTR;
-use windows::Win32::Foundation::{CloseHandle, HWND};
-use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-};
-use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
-
+use crate::focus::process_name;
 use crate::inject::JobKind;
 
 pub struct Event {
@@ -109,24 +103,5 @@ pub fn info(line: String) {
 pub fn debug(line: String) {
     if let Some(tx) = TX.get() {
         let _ = tx.send(Msg::Debug(line));
-    }
-}
-
-fn process_name(hwnd: isize) -> String {
-    unsafe {
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(HWND(hwnd as _), Some(&mut pid));
-        let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
-            return format!("pid {pid}");
-        };
-        let mut buf = [0u16; 260];
-        let mut len = buf.len() as u32;
-        let ok = QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
-        let _ = CloseHandle(handle);
-        if ok.is_err() {
-            return format!("pid {pid}");
-        }
-        let path = String::from_utf16_lossy(&buf[..len as usize]);
-        path.rsplit('\\').next().unwrap_or(&path).to_string()
     }
 }

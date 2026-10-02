@@ -224,9 +224,9 @@ Cần bộ **benchmark offline** (replay chuỗi phím rồi so kết quả) đ�
   - Tốc độ: chữ đúng ~4 µs, lỗi gõ 0,2–1,4 ms.
   - Chưa làm: lỗi cách 2 bước (`khogn`), chỉnh chi phí theo dữ liệu thật.
 - [x] 1.2 Gắn bộ gõ Telex vào hook: engine giữ cả phím thô lẫn chữ trên màn hình, chỉ gõ lại khi bộ gõ đổi chữ (phím thường đi thẳng), Backspace tính lại phím thô bằng `to_keys`, Alt+Z chuyển Việt/Anh.
-- [ ] Gate theo app (terminal, IDE, ô mật khẩu).
+- [x] Gate theo app: terminal/IDE chỉ sửa tiếng Việt; ô mật khẩu (UI Automation, chạy trên luồng riêng, mặc định chặn cho tới khi biết chắc) và app nhạy cảm thì tắt hẳn.
 - [x] Hoàn tác bằng Backspace, reset buffer khi click hoặc dùng phím mũi tên.
-- [ ] Tray icon tối giản (Tauri).
+- [x] Tray icon bằng Win32 thuần (không cần Tauri): icon V/E vẽ bằng GDI, menu, lưu cài đặt, khởi động cùng Windows, chỉ chạy 1 bản.
 - [ ] Benchmark replay và các metric ở mục 7.
 
 ### Phase 2: Ngữ cảnh (3–4 tuần)
