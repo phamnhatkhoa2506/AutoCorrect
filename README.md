@@ -96,7 +96,7 @@ Kết quả (1200 câu mỗi ngôn ngữ), trước và sau Phase 3:
 
 ### Nhật ký để tinh chỉnh bằng dữ liệu thật
 
-Menu khay có mục **Ghi nhật ký sửa lỗi** (mặc định tắt). Khi bật, mỗi lần app sửa một từ hoặc bạn hoàn tác, một dòng được ghi vào `%APPDATA%\nAutoCorrect\njournal.tsv` (`giây\tFIX|UNDO\tphím đã gõ\ttừ sửa\ttừ trước đó`). File chỉ nằm trên máy bạn, không bao giờ gửi đi; xóa tùy ý. Xem báo cáo: `cargo run -p ac-bench --release -- --journal`.
+Menu khay có mục **Ghi nhật ký sửa lỗi** (mặc định tắt). Khi bật, mỗi lần app sửa một từ hoặc bạn hoàn tác, một dòng được ghi vào `%APPDATA%\AutoCorrect\journal.tsv` (`giây\tFIX|UNDO\tphím đã gõ\ttừ sửa\ttừ trước đó`). File chỉ nằm trên máy bạn, không bao giờ gửi đi; xóa tùy ý. Xem báo cáo: `cargo run -p ac-bench --release -- --journal`.
 
 ## Giới hạn đã biết
 
