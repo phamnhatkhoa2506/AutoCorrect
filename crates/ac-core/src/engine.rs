@@ -10,8 +10,11 @@ pub enum Key {
     /// A character that belongs to a word.
     Char(char),
     Backspace,
-    /// Word boundary that triggers correction (Space only in Phase 0).
+    /// Word boundary that triggers correction; typed as a space.
     Space,
+    /// Punctuation that ends a word (, . ; : ! ?). The key itself still
+    /// reaches the program, right after any correction.
+    Punct,
     /// Anything that may move the caret or change the text out of our sight
     /// (mouse click, arrows, Enter, shortcuts, focus change...).
     Reset,
@@ -24,6 +27,8 @@ pub enum Action {
     Pass,
     /// Swallow the key, send `backspaces` Backspaces, then type `text`.
     Replace { backspaces: usize, text: String },
+    /// Send the edit, then let the key through too (punctuation).
+    ReplaceThenPass { backspaces: usize, text: String },
 }
 
 /// One word: the raw keys typed and the text they show on screen.
@@ -42,6 +47,10 @@ struct LastCorrection {
     corrected: String,
     /// The word before it, restored when the correction is undone.
     context: Option<String>,
+    /// The first Backspace after a correction only deletes the space or
+    /// punctuation that ended the word (so that one can be retyped); a
+    /// second one in a row undoes the correction.
+    delimiter_removed: bool,
 }
 
 /// A word undone this many times is never corrected again this session.
@@ -168,7 +177,8 @@ impl<C: Corrector> Engine<C> {
                 self.on_char(c)
             }
             Key::Backspace => self.on_backspace(),
-            Key::Space => self.on_space(),
+            Key::Space => self.on_boundary(false),
+            Key::Punct => self.on_boundary(true),
             Key::Reset => {
                 self.word = Word::default();
                 self.prev_word = None;
@@ -213,7 +223,8 @@ impl<C: Corrector> Engine<C> {
         Word { keys: text.to_string(), shown: text.to_string(), literal: self.vietnamese }
     }
 
-    fn on_space(&mut self) -> Action {
+    /// A word ended by a space (`punct` false) or by punctuation.
+    fn on_boundary(&mut self, punct: bool) -> Action {
         let word = std::mem::take(&mut self.word);
         self.last = None;
         let untracked = std::mem::take(&mut self.untracked);
@@ -222,8 +233,9 @@ impl<C: Corrector> Engine<C> {
         let undos = self.undos.get(&word.keys.to_lowercase()).copied().unwrap_or(0);
         // Only a fully known, non-empty word can be restored on Backspace.
         self.prev_word = (!word.keys.is_empty() && !untracked).then(|| word.clone());
-        // What the next word sees as context: this one, if we know it.
-        self.context = (!word.keys.is_empty() && !untracked).then(|| word.shown.clone());
+        // What the next word sees as context: this one, if we know it, unless
+        // punctuation starts a new phrase (as when the word pairs were counted).
+        self.context = (!word.keys.is_empty() && !untracked && !punct).then(|| word.shown.clone());
 
         self.decision = if word.keys.is_empty() {
             Decision::EmptyWord
@@ -238,10 +250,17 @@ impl<C: Corrector> Engine<C> {
         } else {
             match self.corrector.correct_after(&word.keys, context.as_deref()) {
                 Some(fix) if fix != word.shown => {
-                    let action = replace(&word.shown, &format!("{fix} "));
+                    let action = if punct {
+                        match replace(&word.shown, &fix) {
+                            Action::Replace { backspaces, text } => Action::ReplaceThenPass { backspaces, text },
+                            other => other,
+                        }
+                    } else {
+                        replace(&word.shown, &format!("{fix} "))
+                    };
                     self.prev_word = Some(self.word_showing(&fix));
-                    self.context = Some(fix.clone());
-                    self.last = Some(LastCorrection { original: word, corrected: fix, context });
+                    self.context = (!punct).then(|| fix.clone());
+                    self.last = Some(LastCorrection { original: word, corrected: fix, context, delimiter_removed: false });
                     self.decision = Decision::Corrected;
                     return action;
                 }
@@ -251,17 +270,25 @@ impl<C: Corrector> Engine<C> {
         Action::Pass
     }
 
-    /// Backspace right after a correction undoes it: restores the original
-    /// word (without the trailing space) and counts the undo.
+    /// Two Backspaces in a row right after a correction undo it: the first
+    /// deletes the space or punctuation (which is all that is wanted when the
+    /// user only meant to type a comma there), the second restores the
+    /// original word and counts the undo.
     fn on_backspace(&mut self) -> Action {
-        if let Some(last) = self.last.take() {
-            *self.undos.entry(last.original.keys.to_lowercase()).or_default() += 1;
-            self.just_undone = Some(last.original.keys.clone());
-            let action = replace(&format!("{} ", last.corrected), &last.original.shown);
-            self.word = last.original;
-            self.prev_word = None;
-            self.context = last.context;
-            return action;
+        if self.last.as_ref().is_some_and(|l| l.delimiter_removed) {
+            if let Some(last) = self.last.take() {
+                *self.undos.entry(last.original.keys.to_lowercase()).or_default() += 1;
+                self.just_undone = Some(last.original.keys.clone());
+                // The corrected word is on screen, resumed, with no delimiter.
+                let action = replace(&last.corrected, &last.original.shown);
+                self.word = last.original;
+                self.prev_word = None;
+                self.context = last.context;
+                return action;
+            }
+        }
+        if let Some(last) = self.last.as_mut() {
+            last.delimiter_removed = true; // falls through: resumes the word
         }
         if self.word.shown.pop().is_some() {
             // The app deleted the last character on screen; find keys that
@@ -362,10 +389,13 @@ mod tests {
         let mut e = engine();
         type_str(&mut e, "dunhf");
         e.on_key(Key::Space);
-        // Screen shows "dùng " -> back to "dunhf" (common prefix "d").
+        // The first Backspace only deletes the space ("dùng" stays)...
+        assert_eq!(e.on_key(Key::Backspace), Action::Pass);
+        assert_eq!(e.current_word(), "dùng");
+        // ...the second restores "dunhf" (common prefix "d").
         assert_eq!(
             e.on_key(Key::Backspace),
-            Action::Replace { backspaces: 4, text: "unhf".into() }
+            Action::Replace { backspaces: 3, text: "unhf".into() }
         );
         assert_eq!(e.current_word(), "dunhf");
         // Re-finishing the restored word keeps it.
@@ -375,7 +405,8 @@ mod tests {
     fn type_and_undo(e: &mut Engine<DictCorrector>, word: &str) {
         type_str(e, word);
         assert!(matches!(e.on_key(Key::Space), Action::Replace { .. }));
-        assert!(matches!(e.on_key(Key::Backspace), Action::Replace { .. }));
+        assert_eq!(e.on_key(Key::Backspace), Action::Pass); // the space
+        assert!(matches!(e.on_key(Key::Backspace), Action::Replace { .. })); // the undo
         e.on_key(Key::Reset); // user clears the line
     }
 
@@ -443,8 +474,67 @@ mod tests {
         e.on_key(Key::Space);
         assert_eq!(e.last_decision(), Decision::Corrected);
         e.on_key(Key::Backspace);
+        e.on_key(Key::Backspace);
         e.on_key(Key::Space);
         assert_eq!(e.last_decision(), Decision::JustUndone);
+    }
+
+    #[test]
+    fn punctuation_ends_a_word_and_passes_through() {
+        let mut e = engine();
+        type_str(&mut e, "teh");
+        // The edit is sent first; the comma itself is not part of it.
+        assert_eq!(
+            e.on_key(Key::Punct),
+            Action::ReplaceThenPass { backspaces: 2, text: "he".into() }
+        );
+        assert_eq!(e.last_decision(), Decision::Corrected);
+        // A correct word is left alone, and punctuation alone does nothing.
+        type_str(&mut e, "the");
+        assert_eq!(e.on_key(Key::Punct), Action::Pass);
+        assert_eq!(e.on_key(Key::Punct), Action::Pass);
+    }
+
+    #[test]
+    fn space_then_backspace_keeps_the_fix_so_a_comma_can_follow() {
+        let mut e = engine();
+        type_str(&mut e, "teh");
+        e.on_key(Key::Space);
+        // Backspace removes only the space: no undo, the fixed word resumes.
+        assert_eq!(e.on_key(Key::Backspace), Action::Pass);
+        assert_eq!(e.current_word(), "the");
+        assert_eq!(e.on_key(Key::Punct), Action::Pass);
+        // Typing on after the backspace also keeps the fix (and drops the undo).
+        let mut e = engine();
+        type_str(&mut e, "teh");
+        e.on_key(Key::Space);
+        e.on_key(Key::Backspace);
+        type_str(&mut e, "s");
+        assert_eq!(e.on_key(Key::Backspace), Action::Pass); // plain delete of "s"
+        assert_eq!(e.current_word(), "the");
+    }
+
+    #[test]
+    fn two_backspaces_after_punctuation_undo_too() {
+        let mut e = engine();
+        type_str(&mut e, "teh");
+        e.on_key(Key::Punct); // "the," on screen
+        assert_eq!(e.on_key(Key::Backspace), Action::Pass); // deletes the comma
+        assert_eq!(
+            e.on_key(Key::Backspace),
+            Action::Replace { backspaces: 2, text: "eh".into() }
+        );
+        assert_eq!(e.current_word(), "teh");
+    }
+
+    #[test]
+    fn punctuation_starts_a_new_phrase_for_context() {
+        let mut e = Engine::new(AfterIn);
+        type_words(&mut e, "in ");
+        assert_eq!(e.context(), Some("in"));
+        type_words(&mut e, "a");
+        e.on_key(Key::Punct);
+        assert_eq!(e.context(), None);
     }
 
     #[test]
@@ -530,7 +620,8 @@ mod tests {
         let mut e = vn_engine();
         assert!(press(&mut e, "dunhf").iter().all(|a| *a == Action::Pass));
         assert_eq!(e.on_key(Key::Space), rep(4, "ùng "));
-        assert_eq!(e.on_key(Key::Backspace), rep(4, "unhf"));
+        assert_eq!(e.on_key(Key::Backspace), Action::Pass);
+        assert_eq!(e.on_key(Key::Backspace), rep(3, "unhf"));
         assert_eq!(e.current_word(), "dunhf");
     }
 
@@ -604,6 +695,7 @@ mod tests {
     fn undo_restores_the_context() {
         let mut e = Engine::new(AfterIn);
         type_words(&mut e, "in teh ");
+        e.on_key(Key::Backspace); // deletes the space
         e.on_key(Key::Backspace); // undo: "teh" is back, "in" precedes it
         assert_eq!(e.context(), Some("in"));
     }

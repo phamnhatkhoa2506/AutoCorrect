@@ -61,7 +61,9 @@ cargo run -p ac-data --release
 | `gruwi ` | `gửi ` | đảo phím (gõ thanh `r` quá sớm) |
 | `mooir ` | `mỗi ` | nhầm hỏi/ngã |
 | `git `, `npm `, `cargo `, `Tuan ` | giữ nguyên | chữ có thật / tên riêng / lệnh |
-| `teh ` rồi Backspace ngay | quay về `teh` | hoàn tác |
+| `teh,` / `teh.` / `teh;` | `the,` / `the.` / `the;` | dấu câu cũng là ranh giới từ (phím dấu vẫn đi tiếp bình thường) |
+| `teh ` rồi Backspace | `the` (chỉ xóa dấu cách) | để gõ tiếp dấu phẩy ngay sau chữ |
+| `teh ` rồi Backspace **hai lần** liền | quay về `teh` | hoàn tác bản sửa |
 | `te`, click chuột chỗ khác, gõ `h ` | không sửa | buffer đã reset |
 
 Thử trong: Notepad, Windows Terminal (PowerShell), VS Code, Chrome, Zalo/Messenger, Word.
@@ -100,7 +102,7 @@ Menu khay có mục **Ghi nhật ký sửa lỗi** (mặc định tắt). Khi b�
 
 ## Giới hạn đã biết
 
-- Chỉ kích hoạt sửa bằng Space. Enter/Tab/dấu câu chỉ reset buffer.
+- Sửa khi gõ Space hoặc `, . ; : ! ?` (bàn phím US). Enter, Tab và các ký tự khác (`/`, `-`, ngoặc, nháy) chỉ reset bộ đệm.
 - Chưa có VNI; danh sách app theo từng loại chưa sửa được qua giao diện.
 - Chưa sửa lỗi "sai thành chữ có thật" (`git` vs `it`, `bài` gõ thành `bại`): cần hiểu cả câu.
 - Hai lỗi cùng lúc vẫn hay sai (khoảng một phần tư), nên nhánh này chỉ chạy với từ lạ và ngưỡng chặt.

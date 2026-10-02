@@ -187,9 +187,9 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let context = state.engine.context().map(str::to_string);
         let pending = state.engine.last_correction().map(|(k, f)| (k.to_string(), f.to_string()));
         let action = state.engine.on_key(key);
-        if state.settings.journal && matches!(action, Action::Replace { .. }) {
+        if state.settings.journal && matches!(action, Action::Replace { .. } | Action::ReplaceThenPass { .. }) {
             let entry = match key {
-                Key::Space => state.engine.last_correction().map(|(k, f)| ("FIX", k.to_string(), f.to_string())),
+                Key::Space | Key::Punct => state.engine.last_correction().map(|(k, f)| ("FIX", k.to_string(), f.to_string())),
                 Key::Backspace => pending.map(|(k, f)| ("UNDO", k, f)),
                 _ => None,
             };
@@ -197,7 +197,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
                 log::journal(format!("{kind}\t{keys}\t{fix}\t{}", context.as_deref().unwrap_or("")));
             }
         }
-        if key == Key::Space && log::debug_enabled() {
+        if matches!(key, Key::Space | Key::Punct) && log::debug_enabled() {
             let decision = state.engine.last_decision();
             let mut line = format!("  word on Space: {before:?} (keys {keys:?}, after {context:?}) -> {decision:?}");
             if decision == Decision::NoCandidate {
@@ -211,16 +211,18 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         }
         match action {
             Action::Pass => None,
-            Action::Replace { backspaces, text } => Some((before, backspaces, text)),
+            Action::Replace { backspaces, text } => Some((before, backspaces, text, true)),
+            // Punctuation: our edit first, then the key itself.
+            Action::ReplaceThenPass { backspaces, text } => Some((before, backspaces, text, false)),
         }
     });
 
-    let Some((before, backspaces, text)) = outcome else {
+    let Some((before, backspaces, text, swallow)) = outcome else {
         return false;
     };
     let kind = match key {
         Key::Backspace => JobKind::Undo,
-        Key::Space => JobKind::Fix,
+        Key::Space | Key::Punct => JobKind::Fix,
         _ => JobKind::Compose,
     };
     inject::run(Job {
@@ -231,7 +233,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         text,
         hwnd: foreground.0 as isize,
     });
-    true
+    swallow
 }
 
 fn with_engine(f: impl FnOnce(&mut Engine<SmartCorrector>) -> Action) {
@@ -288,6 +290,10 @@ unsafe fn decode(kb: &KBDLLHOOKSTRUCT) -> Option<Key> {
             let c = v as u8 as char;
             Key::Char(if shift ^ caps { c } else { c.to_ascii_lowercase() })
         }
+        // Punctuation that ends a word, on a US layout: , . ; : ? and !
+        VIRTUAL_KEY(0xBC | 0xBE) if !shift => Key::Punct,
+        VIRTUAL_KEY(0xBA) => Key::Punct,
+        VIRTUAL_KEY(0xBF | 0x31) if shift => Key::Punct,
         VIRTUAL_KEY(v @ 0x30..=0x39) if !shift => Key::Char(v as u8 as char),
         // Enter, Tab, punctuation, arrows, Home/End, Delete, F-keys...
         _ => Key::Reset,
