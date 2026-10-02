@@ -167,6 +167,12 @@ thread_local! {
 /// Maps a raw key to an engine key. `None` = ignore (pure modifiers).
 unsafe fn decode(kb: &KBDLLHOOKSTRUCT) -> Option<Key> {
     let vk = VIRTUAL_KEY(kb.vkCode as u16);
+    // 0xFF is a reserved code that types nothing: key remappers (PowerToys,
+    // AutoHotkey) inject it around their output to keep Alt from opening
+    // menus. Treating it as a reset dropped remapped letters from the word.
+    if vk.0 == 0xFF {
+        return None;
+    }
     if vk == VK_CAPITAL {
         CAPS_LOCK.with(|c| c.set(!c.get()));
     }

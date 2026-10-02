@@ -311,6 +311,7 @@ mod tests {
             ("w", "ư"),
             ("the", "the"),
             ("dungf", "dùng"),
+            ("bajn", "bạn"),
         ] {
             assert_eq!(vn(raw), want, "{raw}");
         }
