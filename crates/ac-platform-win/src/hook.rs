@@ -35,13 +35,15 @@ impl State {
     fn apply(&mut self) {
         let s = self.settings;
         self.engine.set_vietnamese(s.vietnamese);
-        // English corrections would mangle commands and code.
-        self.engine.set_corrections(s.corrections, s.corrections && self.app == AppKind::Normal);
+        // English corrections would mangle commands and code, unless the user
+        // asked for them there (chat panels of an IDE are plain text).
+        let english = self.app == AppKind::Normal || (self.app == AppKind::Code && s.code_english);
+        self.engine.set_corrections(s.corrections, s.corrections && english);
     }
 
     /// Keys must pass through untouched and nothing may be remembered.
     fn hands_off(&self) -> bool {
-        self.settings.paused || self.app == AppKind::Off || focus::blocked()
+        self.settings.paused || self.app == AppKind::Off || focus::password()
     }
 }
 
@@ -182,6 +184,8 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
                 return None;
             }
         }
+        // Not yet known whether this is a password field: follow, do not act.
+        state.engine.set_observing(focus::pending());
         let before = state.engine.current_word().to_string();
         let keys = state.engine.current_keys().to_string();
         let context = state.engine.context().map(str::to_string);

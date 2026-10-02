@@ -19,11 +19,14 @@ pub struct Settings {
     pub paused: bool,
     /// Append every correction and undo to the local journal file.
     pub journal: bool,
+    /// Correct English in terminals and IDEs too (off: only Vietnamese there,
+    /// so commands and code are left alone).
+    pub code_english: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { vietnamese: true, corrections: true, paused: false, journal: false }
+        Self { vietnamese: true, corrections: true, paused: false, journal: false, code_english: false }
     }
 }
 
@@ -49,6 +52,7 @@ pub fn load() -> Settings {
             "corrections" => s.corrections = on,
             "paused" => s.paused = on,
             "journal" => s.journal = on,
+            "code_english" => s.code_english = on,
             _ => {}
         }
     }
@@ -59,11 +63,12 @@ pub fn save(s: &Settings) {
     let Some(path) = path() else { return };
     let flag = |b: bool| if b { 1 } else { 0 };
     let text = format!(
-        "vietnamese={}\ncorrections={}\npaused={}\njournal={}\n",
+        "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\n",
         flag(s.vietnamese),
         flag(s.corrections),
         flag(s.paused),
-        flag(s.journal)
+        flag(s.journal),
+        flag(s.code_english)
     );
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);

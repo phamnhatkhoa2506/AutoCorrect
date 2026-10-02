@@ -40,6 +40,7 @@ const ID_CORRECTIONS: usize = 2;
 const ID_PAUSED: usize = 3;
 const ID_AUTOSTART: usize = 4;
 const ID_JOURNAL: usize = 5;
+const ID_CODE_ENGLISH: usize = 6;
 const ID_EXIT: usize = 9;
 
 thread_local! {
@@ -144,6 +145,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             ID_CORRECTIONS => hook::update(|s| s.corrections = !s.corrections),
             ID_PAUSED => hook::update(|s| s.paused = !s.paused),
             ID_JOURNAL => hook::update(|s| s.journal = !s.journal),
+            ID_CODE_ENGLISH => hook::update(|s| s.code_english = !s.code_english),
             ID_AUTOSTART => settings::set_autostart(!settings::autostart()),
             ID_EXIT => PostQuitMessage(0),
             _ => {}
@@ -160,11 +162,12 @@ unsafe fn show_menu(hwnd: HWND) {
     let s = hook::settings();
     let Ok(menu) = CreatePopupMenu() else { return };
     let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
-    let items: [(usize, PCWSTR, bool); 5] = [
+    let items: [(usize, PCWSTR, bool); 6] = [
         (ID_VIETNAMESE, w!("Tiếng Việt (Telex)\tAlt+Z"), s.vietnamese),
         (ID_CORRECTIONS, w!("Tự sửa lỗi gõ"), s.corrections),
         (ID_PAUSED, w!("Tạm dừng"), s.paused),
         (ID_AUTOSTART, w!("Khởi động cùng Windows"), settings::autostart()),
+        (ID_CODE_ENGLISH, w!("Sửa lỗi tiếng Anh cả trong IDE/terminal"), s.code_english),
         (ID_JOURNAL, w!("Ghi nhật ký sửa lỗi (để tinh chỉnh)"), s.journal),
     ];
     for (id, label, on) in items {

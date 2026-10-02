@@ -2,11 +2,10 @@
 //!
 //! WinEvent callbacks arrive on the main thread (it pumps messages). Asking
 //! UI Automation about the focused element can take tens of milliseconds, so
-//! that runs on a worker. Until it answers, the focus counts as a possible
-//! password field for a short grace period (the first keys of a password
-//! must not be composed or kept), but no longer: in a big page (Edge) or
-//! right after startup the answer can take seconds, and holding back every
-//! key that long dropped the first letters of normal words.
+//! that runs on a worker. Until it answers, keys are only observed for a
+//! short grace period (not composed, not corrected, so a password is never
+//! altered), but no longer: in a big page (Edge) or right after startup the
+//! answer can take seconds. A known password field is hands-off entirely.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -41,20 +40,24 @@ static PENDING: AtomicU64 = AtomicU64::new(0);
 static GENERATION: AtomicU32 = AtomicU32::new(0);
 static CHECK: OnceLock<Sender<()>> = OnceLock::new();
 
-/// How long an unanswered check keeps keys hands-off.
-const GRACE_MS: u64 = 120;
+/// How long an unanswered check keeps keys observe-only.
+const GRACE_MS: u64 = 200;
 
 fn now_ms() -> u64 {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed().as_millis() as u64 + 1
 }
 
-/// Keys must pass through untouched: a password field has focus, or the
-/// check of a very recent focus change has not answered yet.
-pub fn blocked() -> bool {
-    if PASSWORD.load(Ordering::Relaxed) {
-        return true;
-    }
+/// A password field has focus: keys must pass through untouched and nothing
+/// may be remembered.
+pub fn password() -> bool {
+    PASSWORD.load(Ordering::Relaxed)
+}
+
+/// The check of a very recent focus change has not answered yet: keys must
+/// not be changed (no Telex, no corrections), but are still followed so
+/// that words typed right after switching windows are not lost.
+pub fn pending() -> bool {
     let since = PENDING.load(Ordering::Relaxed);
     since != 0 && now_ms().saturating_sub(since) < GRACE_MS
 }

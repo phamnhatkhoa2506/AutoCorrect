@@ -26,7 +26,7 @@ eleaseutocorrect.exe --en       # khởi động ở chế độ Anh
 `autocorrect` **là bộ gõ Telex luôn**: thoát hẳn Unikey/EVKey trước khi chạy (hai bộ gõ cùng lúc sẽ đánh nhau). Chỉ chạy được 1 bản cùng lúc.
 
 - **Icon khay**: `V` đỏ = tiếng Việt, `E` xanh = tiếng Anh, `–` xám = tạm dừng. Bấm trái để chuyển Việt/Anh (hoặc **Alt+Z**).
-- **Menu chuột phải**: Tiếng Việt, Tự sửa lỗi gõ, Tạm dừng, Khởi động cùng Windows, Thoát.
+- **Menu chuột phải**: Tiếng Việt, Tự sửa lỗi gõ, Tạm dừng, Khởi động cùng Windows, Sửa lỗi tiếng Anh cả trong IDE/terminal, Ghi nhật ký sửa lỗi, Thoát.
 - Cài đặt được lưu ở `%APPDATA%\AutoCorrect\settings.ini`.
 
 ### Theo từng app
@@ -34,7 +34,7 @@ eleaseutocorrect.exe --en       # khởi động ở chế độ Anh
 | App | Telex | Sửa lỗi |
 | --- | --- | --- |
 | Bình thường (trình duyệt, chat, Office…) | ✓ | tiếng Việt + tiếng Anh |
-| Terminal, IDE (Windows Terminal, Git Bash, VS Code, Antigravity, JetBrains…) | ✓ | chỉ tiếng Việt |
+| Terminal, IDE (Windows Terminal, Git Bash, VS Code, Antigravity, JetBrains…) | ✓ | chỉ tiếng Việt; bật tiếng Anh ở menu khay **Sửa lỗi tiếng Anh cả trong IDE/terminal** (ví dụ khi gõ vào khung chat của IDE) |
 | Ô mật khẩu, Remote Desktop, KeePass/1Password/Bitwarden | ✗ | ✗ (phím đi thẳng, không giữ gì) |
 
 Danh sách app nằm trong `crates/ac-platform-win/src/policy.rs`. Ô mật khẩu được phát hiện qua UI Automation.

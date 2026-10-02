@@ -104,6 +104,9 @@ pub struct Engine<C: Corrector> {
     committed: usize,
     /// The previous key was Select all.
     select_all: bool,
+    /// Keys are only followed, not acted on: no Telex, no corrections. Used
+    /// while it is not yet known whether a password field has focus.
+    observing: bool,
     last: Option<LastCorrection>,
     /// Keys of the word just restored by an undo: finishing it unchanged
     /// keeps it as is.
@@ -127,6 +130,7 @@ impl<C: Corrector> Engine<C> {
             untracked: false,
             committed: 0,
             select_all: false,
+            observing: false,
             last: None,
             just_undone: None,
             undos: HashMap::new(),
@@ -155,6 +159,13 @@ impl<C: Corrector> Engine<C> {
 
     fn corrections_on(&self) -> bool {
         (self.vietnamese && self.correct_vietnamese) || self.correct_english
+    }
+
+    /// While observing, typed keys pass through untouched (nothing is
+    /// composed or corrected) but are still tracked, so that the word is
+    /// whole when observing ends.
+    pub fn set_observing(&mut self, on: bool) {
+        self.observing = on;
     }
 
     pub fn is_vietnamese(&self) -> bool {
@@ -233,8 +244,10 @@ impl<C: Corrector> Engine<C> {
     /// passes through untouched unless the composition changed earlier text.
     fn on_char(&mut self, c: char) -> Action {
         self.word.keys.push(c);
-        if !self.vietnamese || self.word.literal {
+        if !self.vietnamese || self.word.literal || self.observing {
             self.word.shown.push(c);
+            // Typed as is: the rest of this word is not composed either.
+            self.word.literal |= self.observing;
             return Action::Pass;
         }
         let composed = compose(&self.word.keys).text;
@@ -275,7 +288,7 @@ impl<C: Corrector> Engine<C> {
 
         self.decision = if word.keys.is_empty() {
             Decision::EmptyWord
-        } else if !self.corrections_on() {
+        } else if !self.corrections_on() || self.observing {
             Decision::Disabled
         } else if untracked {
             Decision::Untracked
@@ -876,6 +889,34 @@ mod tests {
         e.on_key(Key::Backspace);
         type_str(&mut e, "teh");
         assert_eq!(e.on_key(Key::Space), Action::Pass);
+    }
+
+    #[test]
+    fn observing_follows_keys_without_acting_on_them() {
+        let mut e = vn_engine();
+        e.set_observing(true);
+        // No Telex: the keys stay as typed, and the word is still known.
+        assert!(press(&mut e, "tooi").iter().all(|a| *a == Action::Pass));
+        assert_eq!(e.current_word(), "tooi");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
+        assert_eq!(e.last_decision(), Decision::Disabled);
+    }
+
+    #[test]
+    fn a_word_started_while_observing_is_corrected_when_it_ends() {
+        let mut e = engine();
+        e.set_observing(true);
+        type_str(&mut e, "te");
+        e.set_observing(false);
+        type_str(&mut e, "h");
+        assert_eq!(e.on_key(Key::Space), Action::Replace { backspaces: 2, text: "he ".into() });
+        // In Vietnamese mode the rest of such a word is not composed.
+        let mut e = vn_engine();
+        e.set_observing(true);
+        press(&mut e, "to");
+        e.set_observing(false);
+        assert!(press(&mut e, "oi").iter().all(|a| *a == Action::Pass));
+        assert_eq!(e.current_word(), "tooi");
     }
 
     #[test]
