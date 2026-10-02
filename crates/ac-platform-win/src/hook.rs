@@ -19,7 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::focus;
 use crate::inject::{self, Job, JobKind, INJECTED_TAG};
 use crate::log;
-use crate::policy::{classify, AppKind};
+use crate::policy::{autocomplete_guard, classify, AppKind};
 use crate::settings::Settings;
 use crate::tray;
 
@@ -28,6 +28,8 @@ struct State {
     foreground: HWND,
     settings: Settings,
     app: AppKind,
+    /// The foreground program completes text inline (browsers, search box).
+    guard: bool,
 }
 
 impl State {
@@ -53,6 +55,7 @@ thread_local! {
         foreground: HWND::default(),
         settings: Settings::default(),
         app: AppKind::Normal,
+        guard: false,
     });
 }
 
@@ -103,6 +106,7 @@ pub fn update(change: impl FnOnce(&mut Settings)) {
 pub fn set_app(kind: AppKind, name: &str) {
     STATE.with(|cell| {
         let Ok(mut state) = cell.try_borrow_mut() else { return };
+        state.guard = autocomplete_guard(name);
         if state.app != kind {
             state.app = kind;
             state.apply();
@@ -174,7 +178,9 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             // Ask the window itself: WinEvents can arrive late or out of
             // order (a taskbar click reports explorer.exe after the app).
             state.foreground = foreground;
-            let kind = classify(&focus::process_name(foreground.0 as isize));
+            let name = focus::process_name(foreground.0 as isize);
+            let kind = classify(&name);
+            state.guard = autocomplete_guard(&name);
             if state.app != kind {
                 state.app = kind;
                 state.apply();
@@ -191,6 +197,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let context = state.engine.context().map(str::to_string);
         let pending = state.engine.last_correction().map(|(k, f)| (k.to_string(), f.to_string()));
         let action = state.engine.on_key(key);
+        let guard = state.guard && state.settings.autocomplete_guard;
         if state.settings.journal && matches!(action, Action::Replace { .. } | Action::ReplaceThenPass { .. }) {
             let entry = match key {
                 Key::Space | Key::Punct(_) => state.engine.last_correction().map(|(k, f)| ("FIX", k.to_string(), f.to_string())),
@@ -215,13 +222,13 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         }
         match action {
             Action::Pass => None,
-            Action::Replace { backspaces, text } => Some((before, backspaces, text, true)),
+            Action::Replace { backspaces, text } => Some((before, backspaces, text, true, guard)),
             // Punctuation: our edit first, then the key itself.
-            Action::ReplaceThenPass { backspaces, text } => Some((before, backspaces, text, false)),
+            Action::ReplaceThenPass { backspaces, text } => Some((before, backspaces, text, false, guard)),
         }
     });
 
-    let Some((before, backspaces, text, swallow)) = outcome else {
+    let Some((before, backspaces, text, swallow, guard)) = outcome else {
         return false;
     };
     let kind = match key {
@@ -236,6 +243,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         backspaces,
         text,
         hwnd: foreground.0 as isize,
+        guard,
         held_ctrl: (key == Key::Undo).then(|| if is_down(VK_LCONTROL) { VK_LCONTROL } else { VK_RCONTROL }),
     });
     swallow

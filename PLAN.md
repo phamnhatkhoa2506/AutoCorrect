@@ -190,6 +190,7 @@ Chính sách mặc định theo app:
 - **`Untracked` quá hay bị kích hoạt**: mọi Backspace khi bộ đệm rỗng bị coi là xóa chữ lạ. Giờ engine đếm số ký tự đã gõ từ lần reset cuối; xóa đúng bằng ấy (hoặc Ctrl+A rồi Backspace) thì con trỏ về chỗ bắt đầu và từ kế tiếp được coi là mới.
 - **Trong lúc chờ kiểm tra mật khẩu, phím phải được theo dõi chứ không bỏ**: engine có chế độ `observing` (phím đi nguyên vẹn, không Telex, không sửa, nhưng vẫn ghi vào bộ đệm), nên từ gõ ngay sau khi chuyển cửa sổ vẫn được sửa ở dấu cách kế tiếp; ô mật khẩu đã biết thì vẫn không ghi gì.
 - **Nhóm IDE/terminal mặc định không sửa tiếng Anh** (để khỏi làm hỏng code), nhưng khung chat trong IDE là văn bản thường: có tùy chọn `code_english` ở menu khay.
+- **Gợi ý tự điền trong ô tìm kiếm/thanh địa chỉ trình duyệt làm Backspace đầu tiên xóa nhầm phần gợi ý** (`to` + gợi ý bôi đen `ols`: Backspace chỉ xóa `ols`, rồi `ô` thành `toô`). Xuất hiện ngẫu nhiên vì gợi ý hiện sau một thoáng. Cách xử lý như các bộ gõ khác: gõ một ký tự rỗng (U+202F) trước và xóa thêm một Backspace; áp dụng cho trình duyệt và ô tìm kiếm Windows, có công tắc trong menu khay.
 - **Không tự động test bằng cách giả lập gõ phím lên desktop thật**, vì phím có thể rơi vào cửa sổ khác. Test E2E phải dùng một cửa sổ test riêng do chính app tạo, và kiểm tra đúng cửa sổ đó đang được focus trước mỗi lần gửi phím.
 
 ---

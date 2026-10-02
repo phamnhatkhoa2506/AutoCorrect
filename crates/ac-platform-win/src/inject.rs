@@ -17,6 +17,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 
 use crate::log::{self, Event};
 
+/// Narrow no-break space: a printable character that replaces a selection and
+/// that no suggestion list reacts to (the trick other Vietnamese input
+/// methods use against inline completion in address bars).
+const EMPTY_CHAR: u16 = 0x202F;
+
 /// Marker in `dwExtraInfo` so the hook can recognise (and skip) our own keys.
 pub const INJECTED_TAG: usize = 0x4143_5350; // "ACSP"
 
@@ -37,6 +42,8 @@ pub struct Job {
     pub backspaces: usize,
     pub text: String,
     pub hwnd: isize,
+    /// The program completes text inline: see [`EMPTY_CHAR`].
+    pub guard: bool,
     /// A Control key the user is holding (Ctrl+Z): released while the keys
     /// go out, otherwise every Backspace would act as Ctrl+Backspace.
     pub held_ctrl: Option<VIRTUAL_KEY>,
@@ -44,7 +51,7 @@ pub struct Job {
 
 /// Sends the replacement now and reports it to the log thread.
 pub fn run(job: Job) {
-    let mut inputs = build_inputs(job.backspaces, &job.text);
+    let mut inputs = build_inputs(job.backspaces, &job.text, job.guard);
     if let Some(ctrl) = job.held_ctrl {
         inputs.insert(0, key_event(ctrl, true));
         inputs.push(key_event(ctrl, false));
@@ -65,8 +72,17 @@ pub fn run(job: Job) {
 }
 
 /// `backspaces` Backspaces followed by `text`, as key down/up pairs.
-fn build_inputs(backspaces: usize, text: &str) -> Vec<INPUT> {
-    let mut inputs = Vec::with_capacity((backspaces + text.len()) * 2);
+fn build_inputs(backspaces: usize, text: &str, guard: bool) -> Vec<INPUT> {
+    let mut inputs = Vec::with_capacity((backspaces + text.len() + 1) * 2);
+    let backspaces = if guard && backspaces > 0 {
+        // Typing replaces a selected inline suggestion; the extra Backspace
+        // then removes this character instead of a real one. Without any
+        // suggestion it is simply typed and deleted again.
+        push_key(&mut inputs, VIRTUAL_KEY(0), EMPTY_CHAR, KEYEVENTF_UNICODE);
+        backspaces + 1
+    } else {
+        backspaces
+    };
     for _ in 0..backspaces {
         push_key(&mut inputs, VK_BACK, 0, KEYBD_EVENT_FLAGS(0));
     }

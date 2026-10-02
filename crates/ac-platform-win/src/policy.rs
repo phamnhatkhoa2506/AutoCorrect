@@ -40,9 +40,32 @@ pub fn classify(process: &str) -> AppKind {
     }
 }
 
+/// Programs whose address and search boxes complete text inline: the part
+/// they add is selected, so the first Backspace deletes that instead of the
+/// letter just typed ("to" + suggestion "ols": Backspace leaves "to").
+const AUTOCOMPLETE: &[&str] = &[
+    "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe",
+    "coccoc.exe", "browser.exe", "searchhost.exe", "searchapp.exe", "searchui.exe",
+    "startmenuexperiencehost.exe",
+];
+
+/// Whether replacements in this program need the inline-completion guard.
+pub fn autocomplete_guard(process: &str) -> bool {
+    AUTOCOMPLETE.contains(&process.to_lowercase().as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browsers_and_search_boxes_need_the_guard() {
+        assert!(autocomplete_guard("msedge.exe"));
+        assert!(autocomplete_guard("Chrome.exe"));
+        assert!(autocomplete_guard("SearchHost.exe"));
+        assert!(!autocomplete_guard("notepad.exe"));
+        assert!(!autocomplete_guard("Antigravity IDE.exe"));
+    }
 
     #[test]
     fn classifies_known_apps() {

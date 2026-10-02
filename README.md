@@ -26,7 +26,7 @@ eleaseutocorrect.exe --en       # khởi động ở chế độ Anh
 `autocorrect` **là bộ gõ Telex luôn**: thoát hẳn Unikey/EVKey trước khi chạy (hai bộ gõ cùng lúc sẽ đánh nhau). Chỉ chạy được 1 bản cùng lúc.
 
 - **Icon khay**: `V` đỏ = tiếng Việt, `E` xanh = tiếng Anh, `–` xám = tạm dừng. Bấm trái để chuyển Việt/Anh (hoặc **Alt+Z**).
-- **Menu chuột phải**: Tiếng Việt, Tự sửa lỗi gõ, Tạm dừng, Khởi động cùng Windows, Sửa lỗi tiếng Anh cả trong IDE/terminal, Ghi nhật ký sửa lỗi, Thoát.
+- **Menu chuột phải**: Tiếng Việt, Tự sửa lỗi gõ, Tạm dừng, Khởi động cùng Windows, Sửa lỗi tiếng Anh cả trong IDE/terminal, Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm, Ghi nhật ký sửa lỗi, Thoát.
 - Cài đặt được lưu ở `%APPDATA%\AutoCorrect\settings.ini`.
 
 ### Theo từng app

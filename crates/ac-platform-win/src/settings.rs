@@ -22,11 +22,13 @@ pub struct Settings {
     /// Correct English in terminals and IDEs too (off: only Vietnamese there,
     /// so commands and code are left alone).
     pub code_english: bool,
+    /// Work around inline completion in browser address and search boxes.
+    pub autocomplete_guard: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { vietnamese: true, corrections: true, paused: false, journal: false, code_english: false }
+        Self { vietnamese: true, corrections: true, paused: false, journal: false, code_english: false, autocomplete_guard: true }
     }
 }
 
@@ -53,6 +55,7 @@ pub fn load() -> Settings {
             "paused" => s.paused = on,
             "journal" => s.journal = on,
             "code_english" => s.code_english = on,
+            "autocomplete_guard" => s.autocomplete_guard = on,
             _ => {}
         }
     }
@@ -63,12 +66,13 @@ pub fn save(s: &Settings) {
     let Some(path) = path() else { return };
     let flag = |b: bool| if b { 1 } else { 0 };
     let text = format!(
-        "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\n",
+        "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\nautocomplete_guard={}\n",
         flag(s.vietnamese),
         flag(s.corrections),
         flag(s.paused),
         flag(s.journal),
-        flag(s.code_english)
+        flag(s.code_english),
+        flag(s.autocomplete_guard)
     );
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
