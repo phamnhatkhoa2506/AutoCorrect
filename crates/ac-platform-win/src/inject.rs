@@ -97,6 +97,16 @@ fn build_inputs(backspaces: usize, text: &str, guard: bool) -> Vec<INPUT> {
     inputs
 }
 
+/// A key no program reacts to (virtual key 0xFF), tagged as ours. Sent after
+/// a hotkey swallowed its key: Alt pressed and released with nothing in
+/// between would open the program's menu bar.
+pub fn dummy_tap() {
+    let inputs = [key_event(VIRTUAL_KEY(0xFF), false), key_event(VIRTUAL_KEY(0xFF), true)];
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
 /// A single key event (down or up), tagged as ours.
 fn key_event(vk: VIRTUAL_KEY, up: bool) -> INPUT {
     INPUT {

@@ -29,7 +29,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::{hook, log};
-use crate::policy::classify;
 
 /// The last answer: a password field has focus.
 static PASSWORD: AtomicBool = AtomicBool::new(false);
@@ -153,7 +152,7 @@ fn recheck_focus() {
 
 fn on_foreground(hwnd: HWND) {
     let name = process_name(hwnd.0 as isize);
-    hook::set_app(classify(&name), &name);
+    hook::set_app(&name);
 }
 
 /// Executable name of the process owning a window ("Notepad.exe").

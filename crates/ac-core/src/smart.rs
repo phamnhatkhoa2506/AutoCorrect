@@ -95,6 +95,35 @@ impl Default for Tuning {
     }
 }
 
+impl Tuning {
+    /// The presets of the settings window: 0 careful (fewer corrections,
+    /// almost never a wrong one), 1 balanced (the default), 2 bold.
+    pub fn preset(level: u8) -> Self {
+        let balanced = Self::default();
+        match level {
+            0 => Self {
+                known_word: 4.5,
+                known_syllable: 6.0,
+                margin: 3.0,
+                floor: 6.5,
+                far_floor: 7.5,
+                restore_margin: 6.5,
+                ..balanced
+            },
+            2 => Self {
+                known_word: 6.9,
+                known_syllable: 7.5,
+                margin: 1.0,
+                floor: 4.5,
+                far_floor: 5.0,
+                restore_margin: 3.5,
+                ..balanced
+            },
+            _ => balanced,
+        }
+    }
+}
+
 pub struct SmartCorrector {
     vi: Lexicon,
     en: Lexicon,

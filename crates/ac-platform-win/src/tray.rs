@@ -7,7 +7,7 @@
 
 use std::cell::Cell;
 
-use windows::core::{w, Result, PCWSTR};
+use windows::core::{w, Result, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CreateBitmap, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreateSolidBrush,
@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DestroyMenu, GetCursorPos, PostMessageW, PostQuitMessage, RegisterClassW,
     RegisterWindowMessageW, SetForegroundWindow, TrackPopupMenu, HICON, ICONINFO, MF_CHECKED,
     MF_SEPARATOR, MF_STRING, MF_UNCHECKED, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE,
-    WM_APP, WM_COMMAND, WM_CONTEXTMENU, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    WM_APP, WM_COMMAND, WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
     WS_OVERLAPPED,
 };
 
@@ -45,6 +45,7 @@ const ID_GUARD: usize = 7;
 const ID_RESTORE: usize = 8;
 const ID_PERSONAL: usize = 10;
 const ID_EXIT: usize = 9;
+const ID_SETTINGS: usize = 11;
 
 thread_local! {
     static WINDOW: Cell<HWND> = Cell::new(HWND::default());
@@ -111,11 +112,11 @@ fn notify_data() -> NOTIFYICONDATAW {
     let s = hook::settings();
     let [vi, en, paused] = ICONS.with(Cell::get);
     let (icon, tip) = if s.paused {
-        (paused, "AutoCorrect – tạm dừng")
+        (paused, "AutoCorrect – tạm dừng".to_string())
     } else if s.vietnamese {
-        (vi, "AutoCorrect – Tiếng Việt (Alt+Z)")
+        (vi, format!("AutoCorrect – Tiếng Việt ({})", s.hotkey))
     } else {
-        (en, "AutoCorrect – English (Alt+Z)")
+        (en, format!("AutoCorrect – English ({})", s.hotkey))
     };
     let mut data = NOTIFYICONDATAW {
         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -136,6 +137,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
     match msg {
         WM_TRAY => match lparam.0 as u32 {
             WM_LBUTTONUP => hook::update(|s| s.vietnamese = !s.vietnamese),
+            WM_LBUTTONDBLCLK => settings::open_settings_window(),
             WM_RBUTTONUP | WM_CONTEXTMENU => show_menu(hwnd),
             _ => {}
         },
@@ -152,6 +154,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             ID_GUARD => hook::update(|s| s.autocomplete_guard = !s.autocomplete_guard),
             ID_RESTORE => hook::update(|s| s.restore_marks = !s.restore_marks),
             ID_PERSONAL => settings::open_personal(),
+            ID_SETTINGS => settings::open_settings_window(),
             ID_AUTOSTART => settings::set_autostart(!settings::autostart()),
             ID_EXIT => PostQuitMessage(0),
             _ => {}
@@ -168,8 +171,9 @@ unsafe fn show_menu(hwnd: HWND) {
     let s = hook::settings();
     let Ok(menu) = CreatePopupMenu() else { return };
     let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
+    let vietnamese = HSTRING::from(format!("Tiếng Việt (Telex)\t{}", s.hotkey));
     let items: [(usize, PCWSTR, bool); 8] = [
-        (ID_VIETNAMESE, w!("Tiếng Việt (Telex)\tAlt+Z"), s.vietnamese),
+        (ID_VIETNAMESE, PCWSTR(vietnamese.as_ptr()), s.vietnamese),
         (ID_CORRECTIONS, w!("Tự sửa lỗi gõ"), s.corrections),
         (ID_PAUSED, w!("Tạm dừng"), s.paused),
         (ID_AUTOSTART, w!("Khởi động cùng Windows"), settings::autostart()),
@@ -182,6 +186,7 @@ unsafe fn show_menu(hwnd: HWND) {
         let _ = AppendMenuW(menu, MF_STRING | check(on), id, label);
     }
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+    let _ = AppendMenuW(menu, MF_STRING, ID_SETTINGS, w!("Cài đặt..."));
     let _ = AppendMenuW(menu, MF_STRING, ID_PERSONAL, w!("Mở từ điển cá nhân..."));
     let _ = AppendMenuW(menu, MF_STRING, ID_EXIT, w!("Thoát"));
 

@@ -12,6 +12,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac-config"
+version = "0.1.0"
+
+[[package]]
 name = "ac-core"
 version = "0.1.0"
 dependencies = [
@@ -39,6 +43,7 @@ dependencies = [
 name = "ac-platform-win"
 version = "0.1.0"
 dependencies = [
+ "ac-config",
  "ac-core",
  "windows",
 ]

@@ -8,6 +8,5 @@ pub mod focus;
 pub mod hook;
 pub mod inject;
 pub mod log;
-pub mod policy;
 pub mod settings;
 pub mod tray;

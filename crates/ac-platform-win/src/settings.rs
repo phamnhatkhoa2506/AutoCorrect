@@ -1,111 +1,40 @@
-//! User settings (%APPDATA%\AutoCorrect\settings.ini) and the "start with
-//! Windows" registry entry.
-
-use std::fs;
-use std::path::PathBuf;
+//! Settings live in `ac-config` (shared with the settings window); this adds
+//! what only Windows can do: the "start with Windows" entry, and starting
+//! other programs.
 
 use windows::core::{w, HSTRING, PCWSTR};
-use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
 };
+use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Settings {
-    /// Telex input on (otherwise keys are typed as is).
-    pub vietnamese: bool,
-    /// Fix typos on Space.
-    pub corrections: bool,
-    /// Everything off: keys pass through untouched.
-    pub paused: bool,
-    /// Append every correction and undo to the local journal file.
-    pub journal: bool,
-    /// Correct English in terminals and IDEs too (off: only Vietnamese there,
-    /// so commands and code are left alone).
-    pub code_english: bool,
-    /// Work around inline completion in browser address and search boxes.
-    pub autocomplete_guard: bool,
-    /// Give Vietnamese words typed without marks their marks (khong -> không).
-    pub restore_marks: bool,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self { vietnamese: true, corrections: true, paused: false, journal: false, code_english: false, autocomplete_guard: true, restore_marks: true }
-    }
-}
-
-fn path() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|dir| PathBuf::from(dir).join("AutoCorrect").join("settings.ini"))
-}
-
-/// The user's own dictionary (see `ac_core::Personal`).
-pub fn personal_path() -> Option<PathBuf> {
-    path().map(|p| p.with_file_name("personal.tsv"))
-}
-
-const PERSONAL_HEADER: &str = "# Từ điển cá nhân của AutoCorrect. Lưu file rồi chuyển sang cửa sổ khác: app tự nạp lại.\n#\n# ignore\ttừ              không bao giờ tự sửa từ này\n# fix\tgõ\tthành          luôn đổi chữ vừa gõ thành chữ bên phải\n#\n# Viết đúng như bạn gõ phím (khi gõ tiếng Việt thì là phím Telex), chữ thường.\n# App tự thêm dòng ignore khi bạn hoàn tác (Ctrl+Z) cùng một lần sửa hai lần.\n#\n# Ví dụ:\n# ignore\tkubectl\n# fix\tko\tkhông\n";
+pub use ac_config::paths::{apps_path, journal_path, personal_path, settings_path};
+pub use ac_config::settings::{load, save, Settings};
 
 /// Opens the personal dictionary in Notepad, creating it first if needed.
 pub fn open_personal() {
-    let Some(path) = personal_path() else { return };
-    if !path.exists() {
-        if let Some(dir) = path.parent() {
-            let _ = fs::create_dir_all(dir);
-        }
-        let _ = fs::write(&path, PERSONAL_HEADER);
-    }
+    let Some(path) = ac_config::personal::ensure_file() else { return };
     let file = HSTRING::from(path.display().to_string());
     unsafe {
         ShellExecuteW(None, w!("open"), w!("notepad.exe"), PCWSTR(file.as_ptr()), None, SW_SHOWNORMAL);
     }
 }
 
-/// Where corrections are journaled when the setting is on.
-pub fn journal_path() -> Option<PathBuf> {
-    path().map(|p| p.with_file_name("journal.tsv"))
-}
-
-pub fn load() -> Settings {
-    let mut s = Settings::default();
-    let Some(text) = path().and_then(|p| fs::read_to_string(p).ok()) else {
-        return s;
+/// Opens the settings window: `autocorrect-settings.exe` next to this program.
+pub fn open_settings_window() {
+    let program = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("autocorrect-settings.exe")))
+        .filter(|path| path.exists());
+    let Some(program) = program else {
+        crate::log::info("autocorrect-settings.exe was not found next to autocorrect.exe".into());
+        return;
     };
-    for line in text.lines() {
-        let Some((key, value)) = line.split_once('=') else { continue };
-        let on = value.trim() == "1";
-        match key.trim() {
-            "vietnamese" => s.vietnamese = on,
-            "corrections" => s.corrections = on,
-            "paused" => s.paused = on,
-            "journal" => s.journal = on,
-            "code_english" => s.code_english = on,
-            "autocomplete_guard" => s.autocomplete_guard = on,
-            "restore_marks" => s.restore_marks = on,
-            _ => {}
-        }
+    let file = HSTRING::from(program.display().to_string());
+    unsafe {
+        ShellExecuteW(None, w!("open"), PCWSTR(file.as_ptr()), None, None, SW_SHOWNORMAL);
     }
-    s
-}
-
-pub fn save(s: &Settings) {
-    let Some(path) = path() else { return };
-    let flag = |b: bool| if b { 1 } else { 0 };
-    let text = format!(
-        "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\n",
-        flag(s.vietnamese),
-        flag(s.corrections),
-        flag(s.paused),
-        flag(s.journal),
-        flag(s.code_english),
-        flag(s.autocomplete_guard),
-        flag(s.restore_marks)
-    );
-    if let Some(dir) = path.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    let _ = fs::write(path, text);
 }
 
 const RUN_KEY: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");

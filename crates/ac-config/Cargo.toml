@@ -1,0 +1,8 @@
+[package]
+name = "ac-config"
+version = "0.1.0"
+edition = "2021"
+
+# No dependencies on purpose: the settings program (Tauri) and every platform
+# layer share this, and none of it is specific to an operating system.
+[dependencies]

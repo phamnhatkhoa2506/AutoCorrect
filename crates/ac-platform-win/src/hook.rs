@@ -13,13 +13,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetForegroundWindow, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_ALTDOWN,
-    LLKHF_INJECTED, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN,
+    LLKHF_INJECTED, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN,
+    WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::focus;
 use crate::inject::{self, Job, JobKind, INJECTED_TAG};
 use crate::log;
-use crate::policy::{autocomplete_guard, classify, AppKind};
+use ac_config::{AppKind, Apps, Detector, Hotkey, Outcome};
+use ac_core::Tuning;
 use crate::settings::Settings;
 use crate::tray;
 
@@ -30,8 +32,16 @@ struct State {
     app: AppKind,
     /// The foreground program completes text inline (browsers, search box).
     guard: bool,
-    /// Modification time of the personal dictionary as last read.
+    /// The user's per-program overrides on top of the built-in lists.
+    apps: Apps,
+    /// Executable name of the foreground program.
+    process: String,
+    /// Recognises the switch key (Vietnamese/English) in the key stream.
+    detector: Detector,
+    /// Modification times of the config files as last read.
     personal_stamp: Option<std::time::SystemTime>,
+    apps_stamp: Option<std::time::SystemTime>,
+    settings_stamp: Option<std::time::SystemTime>,
 }
 
 impl State {
@@ -45,19 +55,53 @@ impl State {
         self.engine.set_corrections(s.corrections, s.corrections && english);
         // Terminals and code would have identifiers rewritten.
         self.engine.set_restore_marks(s.corrections && s.restore_marks && self.app == AppKind::Normal);
+        self.engine.corrector_mut().set_tuning(Tuning::preset(s.strength.level()));
+        if self.detector.hotkey() != s.hotkey {
+            self.detector.set_hotkey(s.hotkey);
+        }
     }
 
-    /// Re-reads the personal dictionary when its file changed (it is edited
-    /// in Notepad, or appended to by a learned word).
-    fn reload_personal(&mut self) {
-        let Some(path) = crate::settings::personal_path() else { return };
-        let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
-        if stamp == self.personal_stamp {
-            return;
+    /// Applies the policy for the foreground program.
+    fn classify_process(&mut self, name: &str) {
+        self.process = name.to_string();
+        self.guard = self.apps.guard(name);
+        let kind = self.apps.classify(name);
+        if self.app != kind {
+            self.app = kind;
+            self.apply();
         }
-        self.personal_stamp = stamp;
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        self.engine.corrector_mut().set_personal(Personal::parse(&text));
+    }
+
+    /// Re-reads the config files that changed since last time: the personal
+    /// dictionary (edited by hand or in the settings window, a learned word
+    /// appended), the per-program overrides, and the settings. One `stat`
+    /// per file, only on focus changes, never per key.
+    fn reload_files(&mut self) {
+        fn changed(path: Option<std::path::PathBuf>, stamp: &mut Option<std::time::SystemTime>) -> Option<String> {
+            let path = path?;
+            let now = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+            if now == *stamp {
+                return None;
+            }
+            *stamp = now;
+            Some(std::fs::read_to_string(&path).unwrap_or_default())
+        }
+        if let Some(text) = changed(ac_config::paths::personal_path(), &mut self.personal_stamp) {
+            self.engine.corrector_mut().set_personal(Personal::parse(&text));
+        }
+        if let Some(text) = changed(ac_config::paths::apps_path(), &mut self.apps_stamp) {
+            self.apps = Apps::parse(&text);
+            let name = self.process.clone();
+            self.classify_process(&name);
+        }
+        if let Some(text) = changed(ac_config::paths::settings_path(), &mut self.settings_stamp) {
+            let new = Settings::parse(&text);
+            if new != self.settings {
+                self.settings = new;
+                self.apply();
+                crate::tray::changed();
+            }
+        }
     }
 
     /// Keys must pass through untouched and nothing may be remembered.
@@ -73,7 +117,12 @@ thread_local! {
         settings: Settings::default(),
         app: AppKind::Normal,
         guard: false,
+        apps: Apps::default(),
+        process: String::new(),
+        detector: Detector::new(Hotkey::ALT_Z),
         personal_stamp: None,
+        apps_stamp: None,
+        settings_stamp: None,
     });
 }
 
@@ -94,8 +143,12 @@ pub fn init(settings: Settings) {
     STATE.with(|cell| {
         let mut state = cell.borrow_mut();
         state.settings = settings;
+        // The caller already loaded the settings file (and may have changed
+        // them for this run only): do not read it again as if it were news.
+        state.settings_stamp = ac_config::paths::settings_path()
+            .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
         state.apply();
-        state.reload_personal();
+        state.reload_files();
     });
 }
 
@@ -138,17 +191,14 @@ pub fn update(change: impl FnOnce(&mut Settings)) {
 }
 
 /// The foreground program changed (from the WinEvent hook).
-pub fn set_app(kind: AppKind, name: &str) {
-    STATE.with(|cell| {
-        let Ok(mut state) = cell.try_borrow_mut() else { return };
-        state.guard = autocomplete_guard(name);
-        state.reload_personal();
-        if state.app != kind {
-            state.app = kind;
-            state.apply();
-        }
+pub fn set_app(name: &str) {
+    let kind = STATE.with(|cell| {
+        let mut state = cell.try_borrow_mut().ok()?;
+        state.reload_files();
+        state.classify_process(name);
+        Some(state.app)
     });
-    if log::debug_enabled() {
+    if let (Some(kind), true) = (kind, log::debug_enabled()) {
         log::debug(format!("foreground: {name} -> {kind:?}"));
     }
 }
@@ -161,9 +211,15 @@ pub unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: L
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
         let msg = wparam.0 as u32;
         let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+        let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
         // Skip our own injected keys, otherwise we would correct our corrections.
-        if is_down && kb.dwExtraInfo != INJECTED_TAG && on_key_down(kb) {
-            return LRESULT(1); // swallow
+        if (is_down || is_up) && kb.dwExtraInfo != INJECTED_TAG {
+            if hotkey_event(kb.vkCode as u16, is_down) {
+                return LRESULT(1); // the switch key itself: swallow
+            }
+            if is_down && on_key_down(kb) {
+                return LRESULT(1); // swallow
+            }
         }
     }
     CallNextHookEx(None, code, wparam, lparam)
@@ -181,14 +237,27 @@ pub unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPAR
     CallNextHookEx(None, code, wparam, lparam)
 }
 
+/// Feeds the switch-key detector. Returns true if the key must be swallowed
+/// (a combination with a key; modifiers alone always pass).
+fn hotkey_event(vk: u16, down: bool) -> bool {
+    let (outcome, alt) = STATE.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut state) => (state.detector.on_event(vk, down), state.settings.hotkey.alt),
+        Err(_) => (Outcome::None, false),
+    });
+    if outcome == Outcome::None {
+        return false;
+    }
+    update(|s| s.vietnamese = !s.vietnamese);
+    if alt {
+        // Alt released alone would open the menu bar of the program.
+        inject::dummy_tap();
+    }
+    outcome == Outcome::FireSwallow
+}
+
 /// Returns true if the key must be swallowed.
 unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
     let started = Instant::now();
-    // Alt+Z switches Vietnamese/English, like Unikey's default.
-    if kb.vkCode == u32::from(b'Z') && kb.flags.0 & LLKHF_ALTDOWN.0 != 0 {
-        update(|s| s.vietnamese = !s.vietnamese);
-        return true;
-    }
     let decoded = decode(kb);
     if log::debug_enabled() {
         log::debug(format!(
@@ -220,13 +289,8 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             // order (a taskbar click reports explorer.exe after the app).
             state.foreground = foreground;
             let name = focus::process_name(foreground.0 as isize);
-            let kind = classify(&name);
-            state.guard = autocomplete_guard(&name);
-            state.reload_personal();
-            if state.app != kind {
-                state.app = kind;
-                state.apply();
-            }
+            state.reload_files();
+            state.classify_process(&name);
             state.engine.on_key(Key::Reset);
             if state.hands_off() {
                 return None;

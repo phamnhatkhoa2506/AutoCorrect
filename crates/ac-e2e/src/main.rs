@@ -224,6 +224,7 @@ fn settings(vietnamese: bool) -> Settings {
         code_english: false,
         autocomplete_guard: true,
         restore_marks: true,
+        ..Settings::default()
     }
 }
 

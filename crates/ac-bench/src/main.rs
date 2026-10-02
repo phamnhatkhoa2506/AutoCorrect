@@ -390,7 +390,7 @@ fn main() {
     let seed = flag("--seed", 7.0) as u64;
     let show = flag("--show", 0.0) as usize;
     let bare_rate = flag("--bare", 0.05);
-    let d = Tuning::default();
+    let d = Tuning::preset(flag("--preset", 1.0) as u8);
     let tuning = Tuning {
         known_word: flag("--known", d.known_word),
         known_syllable: flag("--known-syllable", d.known_syllable),
