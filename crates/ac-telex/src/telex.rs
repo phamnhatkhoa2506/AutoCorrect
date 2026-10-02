@@ -104,23 +104,40 @@ pub fn to_keys(text: &str) -> String {
 /// Composes the raw Telex keys of a single word.
 pub fn compose(raw: &str) -> Composition {
     let mut state = State::default();
-    for key in raw.chars() {
+    for (index, key) in raw.chars().enumerate() {
+        state.index = index;
         state.press(key);
+        state.prev_key = Some(key);
     }
     state.finish(raw)
+}
+
+/// How a word is shown once a repeated key cancelled a mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Revert {
+    /// The cancelling key directly repeats the previous one: drop it, the
+    /// pair stands for one literal letter ("ass" -> "as", "tesst" -> "test").
+    Drop(usize),
+    /// The mark came from an earlier, non-adjacent key ("rece" made "rêc"):
+    /// show every key typed, so "receive" stays "receive".
+    KeepAll,
 }
 
 #[derive(Default)]
 struct State {
     letters: Vec<Letter>,
     tone: Option<Tone>,
-    /// A repeated key cancelled a transformation: the rest is typed literally.
-    reverted: bool,
+    /// Set once a repeated key cancelled a transformation: from then on the
+    /// word is literal.
+    revert: Option<Revert>,
+    /// Index and predecessor of the key being pressed.
+    index: usize,
+    prev_key: Option<char>,
 }
 
 impl State {
     fn press(&mut self, key: char) {
-        if self.reverted || !key.is_ascii_alphabetic() {
+        if self.revert.is_some() || !key.is_ascii_alphabetic() {
             self.push(key);
             return;
         }
@@ -152,7 +169,8 @@ impl State {
     /// Appends `key` literally and stops transforming this word.
     fn revert_with(&mut self, key: char) {
         self.push(key);
-        self.reverted = true;
+        let repeated = self.prev_key.is_some_and(|p| p.eq_ignore_ascii_case(&key));
+        self.revert = Some(if repeated { Revert::Drop(self.index) } else { Revert::KeepAll });
     }
 
     fn shapes(&self) -> Vec<char> {
@@ -241,10 +259,16 @@ impl State {
     }
 
     fn finish(&self, raw: &str) -> Composition {
-        let shapes = self.shapes();
-        if self.reverted {
-            return Composition { text: self.render(&shapes, None), kind: Kind::Literal };
+        if let Some(revert) = self.revert {
+            let text = raw
+                .chars()
+                .enumerate()
+                .filter(|&(i, _)| revert != Revert::Drop(i))
+                .map(|(_, c)| c)
+                .collect();
+            return Composition { text, kind: Kind::Literal };
         }
+        let shapes = self.shapes();
         let kind = if check(&shapes, self.tone, Mode::Complete).is_some() {
             Kind::Vietnamese
         } else if check(&shapes, self.tone, Mode::Prefix).is_some() {
@@ -327,7 +351,18 @@ mod tests {
 
     #[test]
     fn repeated_key_cancels_mark() {
-        for (raw, want) in [("ass", "as"), ("aaa", "aa"), ("tesst", "test"), ("uww", "uw"), ("ddd", "dd")] {
+        for (raw, want) in [
+            ("ass", "as"),
+            ("aaa", "aa"),
+            ("tesst", "test"),
+            ("uww", "uw"),
+            ("ddd", "dd"),
+            ("chaoff", "chaof"),
+            // The cancelled hat came from a non-adjacent "e": keep every key
+            // (it used to show "recive", eating an "e").
+            ("receive", "receive"),
+            ("Receive", "Receive"),
+        ] {
             assert_eq!(compose(raw), Composition { text: want.into(), kind: Kind::Literal }, "{raw}");
         }
     }

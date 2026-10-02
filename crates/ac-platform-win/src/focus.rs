@@ -67,14 +67,16 @@ pub fn start() {
 unsafe extern "system" fn on_event(
     _hook: HWINEVENTHOOK,
     event: u32,
-    hwnd: HWND,
+    _hwnd: HWND,
     _object: i32,
     _child: i32,
     _thread: u32,
     _time: u32,
 ) {
     if event == EVENT_SYSTEM_FOREGROUND {
-        on_foreground(hwnd);
+        // The event's window is not always the one left in front (taskbar
+        // clicks report explorer.exe): ask for the actual foreground.
+        on_foreground(GetForegroundWindow());
     }
     recheck_focus();
 }

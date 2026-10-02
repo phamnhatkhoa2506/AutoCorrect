@@ -19,7 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::focus;
 use crate::inject::{self, Job, JobKind, INJECTED_TAG};
 use crate::log;
-use crate::policy::AppKind;
+use crate::policy::{classify, AppKind};
 use crate::settings::Settings;
 use crate::tray;
 
@@ -165,8 +165,18 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             return None;
         }
         if state.foreground != foreground {
+            // Ask the window itself: WinEvents can arrive late or out of
+            // order (a taskbar click reports explorer.exe after the app).
             state.foreground = foreground;
+            let kind = classify(&focus::process_name(foreground.0 as isize));
+            if state.app != kind {
+                state.app = kind;
+                state.apply();
+            }
             state.engine.on_key(Key::Reset);
+            if state.hands_off() {
+                return None;
+            }
         }
         let before = state.engine.current_word().to_string();
         let keys = state.engine.current_keys().to_string();

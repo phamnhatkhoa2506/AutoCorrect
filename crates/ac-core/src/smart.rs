@@ -117,6 +117,12 @@ impl SmartCorrector {
                 if typed_texts.contains(&text) || required.as_ref().is_some_and(|r| !same_word(r, &skeleton(&text))) {
                     continue;
                 }
+                // Without English corrections (terminals, IDEs) an unaccented
+                // Vietnamese fix is just another English-looking word: "teh"
+                // must not become "the" (a Vietnamese word too) in code.
+                if !self.english && text.is_ascii() {
+                    continue;
+                }
                 let e = scores.entry(text).or_insert(f64::NEG_INFINITY);
                 *e = log_add(*e, f - slip.cost);
             }
@@ -313,7 +319,7 @@ mod tests {
     fn vietnamese_only_mode_for_code() {
         let mut c = corrector();
         c.set_languages(true, false);
-        // ("teh" would still become "the": that is also a Vietnamese word.)
+        assert_eq!(c.correct("teh"), None); // "the" is Vietnamese too, but unaccented
         assert_eq!(c.correct("recieve"), None);
         assert_eq!(c.correct("waht"), None);
         assert_eq!(c.correct("dunhf").as_deref(), Some("dùng"));
