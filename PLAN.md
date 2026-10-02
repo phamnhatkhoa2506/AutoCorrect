@@ -186,6 +186,8 @@ Chính sách mặc định theo app:
 - **"Hiện mật khẩu" biến ô mật khẩu thành ô chữ thường**: nhớ các ô từng bị che (process + AutomationId + tên) và nhận diện theo nhãn (password, pwd, mật khẩu…).
 - **Phím hủy dấu không liền kề** (`rece` → `rêc` rồi thêm `e`): hiện lại đúng mọi phím đã gõ, không làm mất chữ.
 - **Gửi phím thay thế trên luồng riêng làm phím gõ tiếp vượt mặt nó**: lỗi nhân đôi chữ (`toôi`) xuất hiện lúc máy bận ngay sau khi khởi động, rồi tự hết. `SendInput` giờ chạy ngay trong hàm bắt phím, nên phím thật gõ tiếp luôn xếp hàng sau phím của app (đổi lại hàm bắt phím chặn ~15–40 ms mỗi lần thay).
+- **Chặn "có thể là ô mật khẩu" quá lâu làm rơi phím đầu của từ**: UI Automation trong Edge hoặc lúc mới khởi động trả lời sau cả trăm ms đến vài giây, và Alt hay bấm taskbar cũng bắn sự kiện focus. Giờ chỉ chặn tối đa 120 ms khi chưa có câu trả lời (đã biết là ô mật khẩu thì vẫn chặn đến khi rời), và câu trả lời của focus cũ bị bỏ.
+- **`Untracked` quá hay bị kích hoạt**: mọi Backspace khi bộ đệm rỗng bị coi là xóa chữ lạ. Giờ engine đếm số ký tự đã gõ từ lần reset cuối; xóa đúng bằng ấy (hoặc Ctrl+A rồi Backspace) thì con trỏ về chỗ bắt đầu và từ kế tiếp được coi là mới.
 - **Không tự động test bằng cách giả lập gõ phím lên desktop thật**, vì phím có thể rơi vào cửa sổ khác. Test E2E phải dùng một cửa sổ test riêng do chính app tạo, và kiểm tra đúng cửa sổ đó đang được focus trước mỗi lần gửi phím.
 
 ---

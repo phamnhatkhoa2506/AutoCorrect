@@ -2,14 +2,18 @@
 //!
 //! WinEvent callbacks arrive on the main thread (it pumps messages). Asking
 //! UI Automation about the focused element can take tens of milliseconds, so
-//! that runs on a worker; until it answers, the focus counts as a password
-//! field, so no key of a password can be composed or kept.
+//! that runs on a worker. Until it answers, the focus counts as a possible
+//! password field for a short grace period (the first keys of a password
+//! must not be composed or kept), but no longer: in a big page (Edge) or
+//! right after startup the answer can take seconds, and holding back every
+//! key that long dropped the first letters of normal words.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
 use std::thread;
+use std::time::Instant;
 
 use windows::core::PWSTR;
 use windows::Win32::Foundation::{CloseHandle, HWND};
@@ -28,12 +32,31 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::{hook, log};
 use crate::policy::classify;
 
-/// A password field has focus, or the check of a new focus is still running.
-static BLOCKED: AtomicBool = AtomicBool::new(false);
+/// The last answer: a password field has focus.
+static PASSWORD: AtomicBool = AtomicBool::new(false);
+/// When the running check began (milliseconds since start, plus one); 0 when
+/// none is running.
+static PENDING: AtomicU64 = AtomicU64::new(0);
+/// Bumped for every focus change, so a stale answer is dropped.
+static GENERATION: AtomicU32 = AtomicU32::new(0);
 static CHECK: OnceLock<Sender<()>> = OnceLock::new();
 
+/// How long an unanswered check keeps keys hands-off.
+const GRACE_MS: u64 = 120;
+
+fn now_ms() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+/// Keys must pass through untouched: a password field has focus, or the
+/// check of a very recent focus change has not answered yet.
 pub fn blocked() -> bool {
-    BLOCKED.load(Ordering::Relaxed)
+    if PASSWORD.load(Ordering::Relaxed) {
+        return true;
+    }
+    let since = PENDING.load(Ordering::Relaxed);
+    since != 0 && now_ms().saturating_sub(since) < GRACE_MS
 }
 
 /// Installs the WinEvent hooks and starts the password checker.
@@ -50,13 +73,17 @@ pub fn start() {
         let mut was_password = false;
         while rx.recv().is_ok() {
             while rx.try_recv().is_ok() {} // only the latest focus matters
+            let generation = GENERATION.load(Ordering::Relaxed);
             let element = automation.as_ref().and_then(|a| a.GetFocusedElement().ok());
             let password = element.is_some_and(|e| is_password_field(&e, &mut seen_masked));
             if password != was_password && log::debug_enabled() {
                 log::debug(format!("focus: {}", if password { "password field (hands off)" } else { "normal field" }));
             }
             was_password = password;
-            BLOCKED.store(password, Ordering::Relaxed);
+            if GENERATION.load(Ordering::Relaxed) == generation {
+                PASSWORD.store(password, Ordering::Relaxed);
+                PENDING.store(0, Ordering::Relaxed);
+            }
         }
     });
 
@@ -114,7 +141,8 @@ unsafe extern "system" fn on_event(
 }
 
 fn recheck_focus() {
-    BLOCKED.store(true, Ordering::Relaxed);
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+    PENDING.store(now_ms(), Ordering::Relaxed);
     if let Some(tx) = CHECK.get() {
         let _ = tx.send(());
     }

@@ -275,6 +275,9 @@ unsafe fn decode(kb: &KBDLLHOOKSTRUCT) -> Option<Key> {
     }
 
     let alt = kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
+    if !alt && is_down(VK_CONTROL) && vk.0 == 0x41 {
+        return Some(Key::SelectAll);
+    }
     if alt || is_down(VK_CONTROL) || is_down(VK_LWIN) || is_down(VK_RWIN) {
         return Some(Key::Reset); // shortcut: text may change unpredictably
     }

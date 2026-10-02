@@ -15,6 +15,9 @@ pub enum Key {
     /// Punctuation that ends a word (, . ; : ! ?). The key itself still
     /// reaches the program, right after any correction.
     Punct,
+    /// Select all (Ctrl+A): a Backspace right after it empties the field, so
+    /// the text that follows starts clean.
+    SelectAll,
     /// Anything that may move the caret or change the text out of our sight
     /// (mouse click, arrows, Enter, shortcuts, focus change...).
     Reset,
@@ -91,6 +94,12 @@ pub struct Engine<C: Corrector> {
     context: Option<String>,
     /// The buffer is not known to hold the whole on-screen word.
     untracked: bool,
+    /// Characters typed since the last reset that are no longer part of
+    /// `word` (finished words and their delimiters). Backspacing exactly that
+    /// many brings the caret back to where typing began, a clean start.
+    committed: usize,
+    /// The previous key was Select all.
+    select_all: bool,
     last: Option<LastCorrection>,
     /// Keys of the word just restored by an undo: finishing it unchanged
     /// keeps it as is.
@@ -112,6 +121,8 @@ impl<C: Corrector> Engine<C> {
             prev_word: None,
             context: None,
             untracked: false,
+            committed: 0,
+            select_all: false,
             last: None,
             just_undone: None,
             undos: HashMap::new(),
@@ -171,7 +182,18 @@ impl<C: Corrector> Engine<C> {
     }
 
     pub fn on_key(&mut self, key: Key) -> Action {
+        let after_select_all = std::mem::take(&mut self.select_all);
         match key {
+            // Select all then delete leaves the field empty: nothing unseen.
+            Key::Backspace if after_select_all => {
+                self.clear();
+                Action::Pass
+            }
+            Key::SelectAll => {
+                self.clear();
+                self.select_all = true;
+                Action::Pass
+            }
             Key::Char(c) => {
                 self.last = None;
                 self.on_char(c)
@@ -180,15 +202,21 @@ impl<C: Corrector> Engine<C> {
             Key::Space => self.on_boundary(false),
             Key::Punct => self.on_boundary(true),
             Key::Reset => {
-                self.word = Word::default();
-                self.prev_word = None;
-                self.context = None;
-                self.untracked = false;
-                self.last = None;
-                self.just_undone = None;
+                self.clear();
                 Action::Pass
             }
         }
+    }
+
+    /// Forgets everything about the text on screen.
+    fn clear(&mut self) {
+        self.word = Word::default();
+        self.prev_word = None;
+        self.context = None;
+        self.untracked = false;
+        self.committed = 0;
+        self.last = None;
+        self.just_undone = None;
     }
 
     /// Why the last Space did or did not correct the word (for diagnostics).
@@ -227,6 +255,8 @@ impl<C: Corrector> Engine<C> {
     fn on_boundary(&mut self, punct: bool) -> Action {
         let word = std::mem::take(&mut self.word);
         self.last = None;
+        let shown_len = word.shown.chars().count();
+        self.committed += shown_len + 1; // the word and its delimiter
         let untracked = std::mem::take(&mut self.untracked);
         let context = self.context.take();
         let just_undone = self.just_undone.take().is_some_and(|k| k == word.keys);
@@ -258,6 +288,7 @@ impl<C: Corrector> Engine<C> {
                     } else {
                         replace(&word.shown, &format!("{fix} "))
                     };
+                    self.committed = self.committed + fix.chars().count() - shown_len;
                     self.prev_word = Some(self.word_showing(&fix));
                     self.context = (!punct).then(|| fix.clone());
                     self.last = Some(LastCorrection { original: word, corrected: fix, context, delimiter_removed: false });
@@ -305,8 +336,25 @@ impl<C: Corrector> Engine<C> {
         // it, otherwise we are now editing text we never saw.
         self.context = None; // the word before the resumed one is unknown
         match self.prev_word.take() {
-            Some(prev) => self.word = prev,
-            None => self.untracked = true,
+            Some(prev) => {
+                self.committed = self.committed.saturating_sub(prev.shown.chars().count() + 1);
+                self.word = prev;
+            }
+            None => match self.committed {
+                // Before anything we typed: text we never saw.
+                0 => self.untracked = true,
+                // Deleted the last character we typed: the caret is back
+                // where typing began, so the next word starts clean.
+                1 => {
+                    self.committed = 0;
+                    self.untracked = false;
+                }
+                // Inside an earlier word we can no longer read back.
+                n => {
+                    self.committed = n - 1;
+                    self.untracked = true;
+                }
+            },
         }
         Action::Pass
     }
@@ -698,6 +746,75 @@ mod tests {
         e.on_key(Key::Backspace); // deletes the space
         e.on_key(Key::Backspace); // undo: "teh" is back, "in" precedes it
         assert_eq!(e.context(), Some("in"));
+    }
+
+    #[test]
+    fn deleting_exactly_what_was_typed_starts_clean() {
+        // Type "ab cd " (6 characters), then delete all six: the caret is
+        // back where typing began, so the next word is corrected normally.
+        let mut e = engine();
+        type_str(&mut e, "ab");
+        e.on_key(Key::Space);
+        type_str(&mut e, "cd");
+        e.on_key(Key::Space);
+        for _ in 0..6 {
+            assert_eq!(e.on_key(Key::Backspace), Action::Pass);
+        }
+        type_str(&mut e, "teh");
+        assert!(matches!(e.on_key(Key::Space), Action::Replace { .. }));
+        assert_eq!(e.last_decision(), Decision::Corrected);
+    }
+
+    #[test]
+    fn deleting_more_than_was_typed_is_untracked() {
+        let mut e = engine();
+        type_str(&mut e, "ab");
+        e.on_key(Key::Space);
+        for _ in 0..4 {
+            e.on_key(Key::Backspace); // one more than we typed
+        }
+        type_str(&mut e, "teh");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
+        assert_eq!(e.last_decision(), Decision::Untracked);
+    }
+
+    #[test]
+    fn deleting_into_an_earlier_word_is_untracked() {
+        // "ab cd " then four Backspaces: the space, "d", "c", and the space
+        // after "ab": the caret now sits at the end of "ab", which was typed
+        // earlier and cannot be read back as a word.
+        let mut e = engine();
+        type_str(&mut e, "ab");
+        e.on_key(Key::Space);
+        type_str(&mut e, "cd");
+        e.on_key(Key::Space);
+        for _ in 0..4 {
+            e.on_key(Key::Backspace);
+        }
+        type_str(&mut e, "teh");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
+        assert_eq!(e.last_decision(), Decision::Untracked);
+    }
+
+    #[test]
+    fn select_all_then_backspace_empties_the_field() {
+        let mut e = engine();
+        e.on_key(Key::SelectAll);
+        assert_eq!(e.on_key(Key::Backspace), Action::Pass);
+        type_str(&mut e, "teh");
+        assert!(matches!(e.on_key(Key::Space), Action::Replace { .. }));
+        // Without Select all, a Backspace at the start is untracked.
+        let mut e = engine();
+        e.on_key(Key::Backspace);
+        type_str(&mut e, "teh");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
+        // Select all only counts for the very next key.
+        let mut e = engine();
+        e.on_key(Key::SelectAll);
+        e.on_key(Key::Reset);
+        e.on_key(Key::Backspace);
+        type_str(&mut e, "teh");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
     }
 
     #[test]
