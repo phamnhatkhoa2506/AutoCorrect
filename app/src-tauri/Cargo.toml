@@ -1,0 +1,23 @@
+[package]
+name = "autocorrect-settings"
+version = "0.1.0"
+edition = "2021"
+description = "Settings window of AutoCorrect"
+
+# Not part of the root workspace: it pulls in the whole of Tauri.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+ac-config = { path = "../../crates/ac-config" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

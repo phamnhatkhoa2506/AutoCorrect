@@ -139,3 +139,14 @@ Các ca: sửa lỗi tiếng Anh, dấu câu, Telex, gõ nhanh 2 ms/phím, gõ k
 - Hai lỗi cùng lúc vẫn hay sai (khoảng một phần tư), nên nhánh này chỉ chạy với từ lạ và ngưỡng chặt.
 - Từ lạ viết thường (tên riêng, thuật ngữ) đôi khi bị sửa nhầm thành từ phổ biến gần giống (khoảng 2 trên 1000 từ tiếng Anh).
 - Một lần sửa từ lạ tốn 5–10 ms (chữ đúng phổ biến chỉ vài µs).
+
+## Settings window
+
+`app/` is a Tauri v2 + Svelte settings window (`autocorrect-settings.exe`), a separate process that edits the
+config files in `%APPDATA%\AutoCorrect` (hotkey, correction strength, per-app rules, personal dictionary).
+The running app reloads them when the foreground window changes. Build it with `cd app && npm install &&
+npx tauri build --no-bundle`, then put `app\src-tauri\target\release\autocorrect-settings.exe` next to
+`autocorrect.exe` (the tray's "Cài đặt..." item and a double-click on the icon open it).
+
+Linux would be a separate frontend (Fcitx5/IBus or X11); only `ac-core`, `ac-telex`, `ac-data` and `ac-config`
+are reusable there.
