@@ -3,7 +3,7 @@
 //! Recomputed from the full key sequence on every key, so marks and tones can
 //! be typed in any order ("tieengs", "tiesng" and "tieeng" + "s" all agree).
 
-use crate::syllable::{check, nucleus, tone_index, with_tone, Mode, Tone};
+use crate::syllable::{check, nucleus, split_tone, tone_index, with_tone, Mode, Tone};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mark {
@@ -51,6 +51,54 @@ pub enum Kind {
 pub struct Composition {
     pub text: String,
     pub kind: Kind,
+}
+
+/// Telex keys that type `text` ("Việt" -> "Vieetj"), the inverse of
+/// [`compose`] for Vietnamese words. The tone key goes last.
+pub fn to_keys(text: &str) -> String {
+    let mut keys = String::new();
+    let mut tone_key = None;
+    for c in text.chars() {
+        let upper = c.is_uppercase();
+        let (base, tone) = split_tone(c.to_lowercase().next().unwrap_or(c));
+        if let Some(t) = tone {
+            tone_key = Some(match t {
+                Tone::Sac => 's',
+                Tone::Huyen => 'f',
+                Tone::Hoi => 'r',
+                Tone::Nga => 'x',
+                Tone::Nang => 'j',
+            });
+        }
+        let spelled = match base {
+            'â' => "aa",
+            'ă' => "aw",
+            'ê' => "ee",
+            'ô' => "oo",
+            'ơ' => "ow",
+            'ư' => "uw",
+            'đ' => "dd",
+            _ => {
+                if upper {
+                    keys.extend(base.to_uppercase());
+                } else {
+                    keys.push(base);
+                }
+                continue;
+            }
+        };
+        let mut chars = spelled.chars();
+        if let Some(first) = chars.next() {
+            if upper {
+                keys.extend(first.to_uppercase());
+            } else {
+                keys.push(first);
+            }
+        }
+        keys.extend(chars);
+    }
+    keys.extend(tone_key);
+    keys
 }
 
 /// Composes the raw Telex keys of a single word.
@@ -289,6 +337,19 @@ mod tests {
         assert_eq!(compose("tiee").kind, Kind::Partial); // tiê
         assert_eq!(compose("cac").kind, Kind::Partial); // needs sắc/nặng
         assert_eq!(compose("ngh").kind, Kind::Partial);
+    }
+
+    #[test]
+    fn to_keys_round_trips() {
+        assert_eq!(to_keys("Việt"), "Vieetj");
+        assert_eq!(to_keys("được"), "dduwowcj");
+        assert_eq!(to_keys("Đường"), "Dduwowngf");
+        for w in [
+            "việt", "được", "tiếng", "nguyễn", "hòa", "thủy", "mưa", "gì", "giữ", "quốc", "của",
+            "không", "khuya", "người", "hoặc", "quân", "Đi", "việ", "tiê", "ă", "the",
+        ] {
+            assert_eq!(compose(&to_keys(w)).text, w, "{w} via {}", to_keys(w));
+        }
     }
 
     #[test]

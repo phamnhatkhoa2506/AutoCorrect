@@ -2,7 +2,11 @@ use std::collections::HashMap;
 
 /// Proposes a replacement for a finished word, or `None` to leave it alone.
 pub trait Corrector {
+    /// `word` is the raw keys typed (Telex keys in Vietnamese mode).
     fn correct(&self, word: &str) -> Option<String>;
+
+    /// Called when the user switches between Vietnamese and English mode.
+    fn set_vietnamese(&mut self, _on: bool) {}
 }
 
 /// Phase 0 corrector: exact lookup in a typo -> fix table, preserving case.

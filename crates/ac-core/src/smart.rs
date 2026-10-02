@@ -54,11 +54,6 @@ impl SmartCorrector {
         Self { vi, en, vietnamese: true }
     }
 
-    /// With Vietnamese off, only English corrections are proposed.
-    pub fn set_vietnamese(&mut self, on: bool) {
-        self.vietnamese = on;
-    }
-
     /// Best known reading per text of a key sequence: (text, ln frequency).
     fn readings(&self, keys: &str) -> Vec<(String, f64)> {
         let mut out = Vec::with_capacity(2);
@@ -133,6 +128,11 @@ impl SmartCorrector {
 }
 
 impl Corrector for SmartCorrector {
+    /// With Vietnamese off, only English corrections are proposed.
+    fn set_vietnamese(&mut self, on: bool) {
+        self.vietnamese = on;
+    }
+
     fn correct(&self, word: &str) -> Option<String> {
         let keys = Self::keys_of(word)?;
         let (typed, vietnamese) = self.typed(&keys);

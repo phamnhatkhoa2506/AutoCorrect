@@ -18,9 +18,19 @@ use crate::log::{self, Event};
 /// Marker in `dwExtraInfo` so the hook can recognise (and skip) our own keys.
 pub const INJECTED_TAG: usize = 0x4143_5350; // "ACSP"
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobKind {
+    /// Telex composition while typing (â, tones...).
+    Compose,
+    /// Typo correction at the end of a word.
+    Fix,
+    /// Backspace reverting a correction.
+    Undo,
+}
+
 pub struct Job {
     pub started: Instant,
-    pub undo: bool,
+    pub kind: JobKind,
     pub from: String,
     pub backspaces: usize,
     pub text: String,
@@ -40,7 +50,7 @@ pub fn start() {
             log::send(Event {
                 latency: job.started.elapsed(),
                 send_time: send_start.elapsed(),
-                undo: job.undo,
+                kind: job.kind,
                 from: job.from,
                 backspaces: job.backspaces,
                 text: job.text,

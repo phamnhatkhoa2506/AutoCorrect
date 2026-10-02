@@ -16,7 +16,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     LLKHF_INJECTED, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN,
 };
 
-use crate::inject::{self, Job, INJECTED_TAG};
+use crate::inject::{self, Job, JobKind, INJECTED_TAG};
 use crate::log;
 
 struct State {
@@ -70,6 +70,12 @@ pub unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPAR
 /// Returns true if the key must be swallowed.
 unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
     let started = Instant::now();
+    // Alt+Z switches Vietnamese/English, like Unikey's default.
+    if kb.vkCode == u32::from(b'Z') && kb.flags.0 & LLKHF_ALTDOWN.0 != 0 {
+        let on = !STATE.with(|cell| cell.borrow().engine.is_vietnamese());
+        set_vietnamese(on);
+        return true;
+    }
     let decoded = decode(kb);
     if log::debug_enabled() {
         log::debug(format!(
@@ -96,12 +102,13 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             state.engine.on_key(Key::Reset);
         }
         let before = state.engine.current_word().to_string();
+        let keys = state.engine.current_keys().to_string();
         let action = state.engine.on_key(key);
         if key == Key::Space && log::debug_enabled() {
             let decision = state.engine.last_decision();
-            let mut line = format!("  word on Space: {before:?} -> {decision:?}");
+            let mut line = format!("  word on Space: {before:?} (keys {keys:?}) -> {decision:?}");
             if decision == Decision::NoCandidate {
-                if let Some(r) = state.engine.corrector().rank(&before) {
+                if let Some(r) = state.engine.corrector().rank(&keys) {
                     let top: Vec<String> =
                         r.candidates.iter().take(3).map(|(w, s)| format!("{w} {s:.1}")).collect();
                     line += &format!("  (typed {:.1}; top: {})", r.typed, top.join(", "));
@@ -118,15 +125,25 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
     let Some((before, backspaces, text)) = outcome else {
         return false;
     };
+    let kind = match key {
+        Key::Backspace => JobKind::Undo,
+        Key::Space => JobKind::Fix,
+        _ => JobKind::Compose,
+    };
     inject::queue(Job {
         started,
-        undo: key == Key::Backspace,
+        kind,
         from: before,
         backspaces,
         text,
         hwnd: foreground.0 as isize,
     });
     true
+}
+
+pub fn set_vietnamese(on: bool) {
+    STATE.with(|cell| cell.borrow_mut().engine.set_vietnamese(on));
+    log::info(format!("mode: {}", if on { "Vietnamese (Telex)" } else { "English" }));
 }
 
 fn with_engine(f: impl FnOnce(&mut Engine<SmartCorrector>) -> Action) {

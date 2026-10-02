@@ -1,7 +1,7 @@
-//! Phase 0 spike: global keyboard hook -> ac-core engine -> SendInput.
+//! Spike app: global keyboard hook -> ac-core engine (Telex + corrector) -> SendInput.
 //!
-//! Run, then type `teh ` or `dunhf ` (Vietnamese IME off) in any app.
-//! Press Backspace right after a correction to undo it. Ctrl+C here to quit.
+//! Starts in Vietnamese mode (`--en` for English); Alt+Z toggles. Typos are
+//! fixed on Space; Backspace right after a fix undoes it. Ctrl+C here to quit.
 
 mod hook;
 mod inject;
@@ -35,8 +35,9 @@ fn main() -> Result<()> {
         let keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook::keyboard_proc), Some(hinstance), 0)?;
         let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(hook::mouse_proc), Some(hinstance), 0)?;
 
-        println!("ac-spike running. Type `teh `, `dunhf `, `mooir ` anywhere. Ctrl+C to quit.");
-        println!("Turn the Vietnamese IME (Unikey/EVKey) OFF for this spike.\n");
+        println!("ac-spike running: Telex input + typo correction in every app. Ctrl+C to quit.");
+        println!("Alt+Z switches Vietnamese/English. Quit Unikey/EVKey first (two IMEs fight).\n");
+        hook::set_vietnamese(!has_flag("--en"));
 
         // Low-level hooks are called on this thread, so it must keep pumping.
         let mut msg = MSG::default();

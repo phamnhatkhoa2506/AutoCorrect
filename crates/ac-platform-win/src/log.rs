@@ -14,8 +14,10 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 
+use crate::inject::JobKind;
+
 pub struct Event {
-    pub undo: bool,
+    pub kind: JobKind,
     pub from: String,
     pub backspaces: usize,
     pub text: String,
@@ -31,6 +33,7 @@ pub struct Event {
 enum Msg {
     Correction(Event),
     Debug(String),
+    Info(String),
 }
 
 static TX: OnceLock<Sender<Msg>> = OnceLock::new();
@@ -49,12 +52,22 @@ pub fn start(debug: bool) {
                     println!("  · {line}");
                     continue;
                 }
+                Msg::Info(line) => {
+                    println!("{line}");
+                    continue;
+                }
             };
             latencies_us.push(e.latency.as_micros());
             latencies_us.sort_unstable();
             let pct = |p: f64| latencies_us[((latencies_us.len() - 1) as f64 * p) as usize];
 
-            let kind = if e.undo { "UNDO" } else { "FIX " };
+            // Telex composition happens on most Vietnamese words: debug only.
+            let kind = match e.kind {
+                JobKind::Compose if !debug_enabled() => continue,
+                JobKind::Compose => "TELEX",
+                JobKind::Fix => "FIX  ",
+                JobKind::Undo => "UNDO ",
+            };
             let blocked = if (e.sent_inputs as usize) < e.expected_inputs {
                 format!("  !! only {}/{} inputs accepted", e.sent_inputs, e.expected_inputs)
             } else {
@@ -83,6 +96,13 @@ pub fn send(event: Event) {
 
 pub fn debug_enabled() -> bool {
     DEBUG.load(Ordering::Relaxed)
+}
+
+/// Always printed (mode changes...).
+pub fn info(line: String) {
+    if let Some(tx) = TX.get() {
+        let _ = tx.send(Msg::Info(line));
+    }
 }
 
 /// Prints every decoded key: local console only, opt-in via `--debug`.

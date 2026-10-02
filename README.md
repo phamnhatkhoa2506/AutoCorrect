@@ -15,10 +15,11 @@ Realtime typo correction for every Windows app. Kế hoạch chi tiết: [PLAN.m
 cargo test
 cargo run --release --bin ac-spike                       # bình thường
 cargo run --release --bin ac-spike -- --debug            # in mọi phím, quyết định và top phương án (chỉ ra console)
+cargo run --release --bin ac-spike -- --en               # khởi động ở chế độ Anh
 cargo run --release --bin ac-spike -- --normal-priority  # A/B: tắt ưu tiên cao cho luồng hook
 ```
 
-**Tắt Unikey/EVKey** (hoặc chuyển sang chế độ E) trước khi test. Bộ gõ Telex riêng chưa được gắn vào hook (Phase 1.2), nên chữ Telex gõ đúng như `tieengs` vẫn hiện nguyên phím thô; chỉ chữ gõ **sai** mới được sửa.
+`ac-spike` **là bộ gõ Telex luôn**: thoát hẳn Unikey/EVKey trước khi chạy (hai bộ gõ cùng lúc sẽ đánh nhau). Mặc định chế độ Việt; **Alt+Z** chuyển Việt/Anh, hoặc chạy với `--en` để khởi động ở chế độ Anh. Ở chế độ Anh chỉ sửa lỗi tiếng Anh.
 
 Build lại dữ liệu (cần tải corpus vào `data/raw/` trước, xem đầu file `crates/ac-data/src/main.rs`):
 
@@ -30,6 +31,8 @@ cargo run -p ac-data --release
 
 | Gõ | Kết quả mong đợi | Loại lỗi |
 | --- | --- | --- |
+| `tieengs vieetj ` | `tiếng việt ` | gõ Telex bình thường |
+| `vieetj`, Backspace, `n` | `viện` | sửa giữa chừng |
 | `teh ` / `TEH ` / `hte ` | `the ` / `THE ` / `the ` | đảo phím |
 | `Recieve ` | `Receive ` | đảo phím, giữ chữ hoa |
 | `untill ` / `occured ` | `until ` / `occurred ` | thừa/thiếu chữ gõ đôi |
@@ -49,7 +52,7 @@ Console in mỗi lần sửa kèm độ trễ (p50/p99) và tên process. Nếu 
 ## Giới hạn đã biết
 
 - Chỉ kích hoạt sửa bằng Space. Enter/Tab/dấu câu chỉ reset buffer.
-- Chưa gắn bộ gõ Telex riêng vào hook (Phase 1.2), nên chưa thay được Unikey.
+- Chưa có VNI, chưa có tray icon/cài đặt; tắt app = Ctrl+C trong console.
 - Chưa phân biệt app (terminal/IDE/ô mật khẩu).
 - Chưa sửa lỗi "sai thành chữ có thật" (`git` vs `it`), việc này cần ngữ cảnh (Phase 2).
 - Lỗi cách 2 bước chưa sửa được (`khogn` → `không`). Một số lỗi chính tả tiếng Anh như `seperate`, `thier` vẫn chưa được sửa (xem test `known_misses`).

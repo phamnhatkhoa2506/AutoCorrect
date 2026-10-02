@@ -223,7 +223,7 @@ Cần bộ **benchmark offline** (replay chuỗi phím rồi so kết quả) đ�
   - Chữ phổ biến (≥ 1000 lần mỗi tỷ từ) không bao giờ bị sửa; âm tiết hợp lệ chỉ được sửa dấu; tên riêng viết hoa đầu được giữ nguyên.
   - Tốc độ: chữ đúng ~4 µs, lỗi gõ 0,2–1,4 ms.
   - Chưa làm: lỗi cách 2 bước (`khogn`), chỉnh chi phí theo dữ liệu thật.
-- [ ] 1.2 Gắn bộ gõ Telex vào hook để thay Unikey (hiện composer mới chỉ dùng để sinh phương án sửa).
+- [x] 1.2 Gắn bộ gõ Telex vào hook: engine giữ cả phím thô lẫn chữ trên màn hình, chỉ gõ lại khi bộ gõ đổi chữ (phím thường đi thẳng), Backspace tính lại phím thô bằng `to_keys`, Alt+Z chuyển Việt/Anh.
 - [ ] Gate theo app (terminal, IDE, ô mật khẩu).
 - [x] Hoàn tác bằng Backspace, reset buffer khi click hoặc dùng phím mũi tên.
 - [ ] Tray icon tối giản (Tauri).
