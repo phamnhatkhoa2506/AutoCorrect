@@ -26,7 +26,7 @@ eleaseutocorrect.exe --en       # khởi động ở chế độ Anh
 `autocorrect` **là bộ gõ Telex luôn**: thoát hẳn Unikey/EVKey trước khi chạy (hai bộ gõ cùng lúc sẽ đánh nhau). Chỉ chạy được 1 bản cùng lúc.
 
 - **Icon khay**: `V` đỏ = tiếng Việt, `E` xanh = tiếng Anh, `–` xám = tạm dừng. Bấm trái để chuyển Việt/Anh (hoặc **Alt+Z**).
-- **Menu chuột phải**: Tiếng Việt, Tự sửa lỗi gõ, Tạm dừng, Khởi động cùng Windows, Sửa lỗi tiếng Anh cả trong IDE/terminal, Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm, Ghi nhật ký sửa lỗi, Thoát.
+- **Menu chuột phải**: Tiếng Việt, Tự sửa lỗi gõ, Tạm dừng, Khởi động cùng Windows, Sửa lỗi tiếng Anh cả trong IDE/terminal, Tự thêm dấu khi gõ không dấu, Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm, Ghi nhật ký sửa lỗi, Thoát.
 - Cài đặt được lưu ở `%APPDATA%\AutoCorrect\settings.ini`.
 
 ### Theo từng app
@@ -56,6 +56,7 @@ cargo run -p ac-data --release
 | `untill ` / `occured ` | `until ` / `occurred ` | thừa/thiếu chữ gõ đôi |
 | `definately ` / `seperate ` / `thier ` | `definitely ` / `separate ` / `their ` | danh sách lỗi chính tả phổ biến |
 | `khogn ` | `không ` | hai lỗi cùng lúc (đảo phím + thiếu `o`) |
+| `tôi khong ` | `tôi không ` | gõ không dấu, thêm dấu theo từ đứng trước |
 | `dunhf ` | `dùng ` | lệch sang phím bên cạnh (h ↔ g) |
 | `nhnah ` | `nhanh ` | đảo phím |
 | `gruwi ` | `gửi ` | đảo phím (gõ thanh `r` quá sớm) |
@@ -75,6 +76,12 @@ Console in mỗi lần sửa kèm độ trễ (p50/p99) và tên process. Nếu 
 Ba tầng, từ rẻ đến đắt: (1) danh sách lỗi chính tả phổ biến `data/en_misspellings.tsv`; (2) noisy channel: mỗi phương án = tần suất (có tính từ đứng trước, bảng bigram) trừ chi phí của kiểu gõ nhầm (đảo phím, lệch phím, nhầm hỏi/ngã, thiếu/thừa phím dấu hoặc chữ gõ đôi, nhầm nguyên âm); (3) nếu từ lạ và không có phương án một lỗi nào đủ chắc thì thử hai lỗi (`khogn` → `không`). Mọi ngưỡng nằm trong `Tuning` (`crates/ac-core/src/smart.rs`).
 
 Quy tắc an toàn: từ phổ biến không bao giờ bị sửa; âm tiết tiếng Việt hợp lệ chỉ được đổi dấu (không thêm/bớt thanh, không đổi chữ cái); từ viết hoa đứng giữa câu coi là tên riêng; sau một từ tiếng Anh thì phương án tiếng Việt bị phạt và ngược lại.
+
+### Gõ tiếng Việt không dấu
+
+Từ gõ ra hoàn toàn không dấu (`khong`, `duoc`, `gui`) được thêm dấu khi gõ Space hoặc dấu câu, dựa vào từ đứng trước: `tôi khong ` → `tôi không `. Chữ không dấu là từ có thật trong dữ liệu (nhiều văn bản trên mạng viết không dấu), nên tần suất của nó không phân biệt được với lỗi gõ. Vì vậy các dạng có dấu cùng chữ cái cạnh tranh với nó, và dạng thắng phải áp đảo cả từ đã gõ lẫn dạng có dấu đứng thứ hai. Từ mơ hồ (`ban` = bạn/bán/bản/bàn) giữ nguyên; từ cũng là tiếng Anh phổ biến (`the`, `do`, `can`) giữ nguyên; chữ viết hoa đầu từ giữ nguyên (có thể là tên người như `Tuan`, `Hung`). Chỉ chạy ở chế độ Việt, không chạy trong terminal/IDE; có công tắc ở menu khay (**Tự thêm dấu khi gõ không dấu**), vì bạn có thể cố ý gõ không dấu (URL, tên file).
+
+Benchmark: trong số từ gõ không dấu, sửa đúng 36–39%, sửa sai 2%, phần còn lại là các từ mơ hồ.
 
 ### Benchmark
 

@@ -243,6 +243,7 @@ Cần bộ **benchmark offline** (replay chuỗi phím rồi so kết quả) đ�
 - [x] Benchmark `ac-bench` (câu giữ lại + lỗi nhân tạo, A/B có/không ngữ cảnh, dò ngưỡng); dùng nó để chọn các ngưỡng mặc định.
 - [x] Lỗi hai bước (`khogn` → `không`), danh sách lỗi chính tả phổ biến, tên riêng giữa câu.
 - [x] Nhật ký sửa lỗi tùy chọn (local) + báo cáo `ac-bench --journal`, để lấy dữ liệu thật.
+- [x] Thêm dấu cho từ gõ không dấu (`tôi khong` → `tôi không`): dạng có dấu cùng chữ cái cạnh tranh với từ trần (có bigram), phải thắng áp đảo (margin 5, ambiguity 1.5); bỏ qua từ tiếng Anh phổ biến và chữ viết hoa. Đo bằng loại lỗi "no marks" trong `ac-bench`: đúng ~37%, sai ~2%.
 - [ ] Sửa "sai thành chữ có thật" bằng ngữ cảnh (43% lỗi gõ tiếng Việt rơi vào đây): cần ngưỡng rất chặt và đo trên benchmark trước khi bật.
 - [ ] Khớp chi phí các kiểu gõ nhầm (`crates/ac-core/src/edits.rs`) với nhật ký thật khi đã đủ dữ liệu.
 - [ ] Từ điển cá nhân, tự học từ undo (từ bị undo 2 lần thì không sửa nữa).

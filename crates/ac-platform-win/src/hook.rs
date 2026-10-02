@@ -41,6 +41,8 @@ impl State {
         // asked for them there (chat panels of an IDE are plain text).
         let english = self.app == AppKind::Normal || (self.app == AppKind::Code && s.code_english);
         self.engine.set_corrections(s.corrections, s.corrections && english);
+        // Terminals and code would have identifiers rewritten.
+        self.engine.set_restore_marks(s.corrections && s.restore_marks && self.app == AppKind::Normal);
     }
 
     /// Keys must pass through untouched and nothing may be remembered.

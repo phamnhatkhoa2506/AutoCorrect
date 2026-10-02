@@ -12,6 +12,9 @@ pub trait Corrector {
 
     /// Which languages corrections may produce (input mode, per-app policy).
     fn set_languages(&mut self, _vietnamese: bool, _english: bool) {}
+
+    /// Whether Vietnamese words typed without any marks are given them.
+    fn set_restore_marks(&mut self, _on: bool) {}
 }
 
 /// Phase 0 corrector: exact lookup in a typo -> fix table, preserving case.

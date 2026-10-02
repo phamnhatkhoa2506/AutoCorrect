@@ -63,6 +63,15 @@ pub struct Tuning {
     /// Penalty for a candidate of the other language than the previous word
     /// (an English word after an English word is more likely English).
     pub language_penalty: f64,
+    /// A word typed without marks gets them only if the best accented form
+    /// beats the bare word by this much (ln units: 5 is about 150 times as
+    /// likely)...
+    pub restore_margin: f64,
+    /// ...and the second best accented form by this much.
+    pub restore_ambiguity: f64,
+    /// Bare words that are also English words at least this common ("the",
+    /// "do", "can") are left alone.
+    pub restore_english: f64,
 }
 
 impl Default for Tuning {
@@ -78,6 +87,9 @@ impl Default for Tuning {
             far_ambiguity: 1.0,
             bigram_weight: 0.5,
             language_penalty: 3.0,
+            restore_margin: 5.0,
+            restore_ambiguity: 1.5,
+            restore_english: 8.0,
         }
     }
 }
@@ -97,6 +109,11 @@ pub struct SmartCorrector {
     english: bool,
     /// Use the previous word to rank candidates.
     context: bool,
+    /// Give words typed without marks their marks.
+    restore: bool,
+    /// Vietnamese words by their letters without marks ("khong" -> không,
+    /// khống, khổng...), as lexicon ids.
+    bare_index: HashMap<String, Vec<u32>>,
     tuning: Tuning,
     /// Known misspellings and their fixes (English), checked first.
     misspellings: HashMap<String, String>,
@@ -121,6 +138,10 @@ struct Context {
 impl SmartCorrector {
     pub fn new(vi: Lexicon, en: Lexicon) -> Self {
         let vi_keys = vi.words().iter().map(|(w, _)| to_keys(w)).collect();
+        let mut bare_index: HashMap<String, Vec<u32>> = HashMap::new();
+        for (id, (word, _)) in vi.words().iter().enumerate() {
+            bare_index.entry(skeleton(word).0).or_default().push(id as u32);
+        }
         Self {
             vi,
             en,
@@ -130,6 +151,8 @@ impl SmartCorrector {
             vietnamese: true,
             english: true,
             context: true,
+            restore: true,
+            bare_index,
             tuning: Tuning::default(),
             misspellings: HashMap::new(),
         }
@@ -223,6 +246,54 @@ impl SmartCorrector {
     fn vietnamese_text(&self, keys: &str) -> Option<String> {
         let c = compose(keys);
         (self.vietnamese && c.kind == Kind::Vietnamese).then_some(c.text)
+    }
+
+    /// A Vietnamese word typed without any marks ("khong" for "không"). The
+    /// bare syllable is a real word in the corpora (people do write without
+    /// accents), so its own frequency cannot tell it from a typo. Instead
+    /// the accented forms with the same letters compete with it, the
+    /// previous word as evidence, and one must win by a wide margin.
+    fn restore_marks(&self, word: &str, keys: &str, prev: Option<&str>) -> Option<String> {
+        // Typed without marks: the Telex keys changed nothing. (Not required
+        // to be a valid syllable: "duoc" is not one, yet it is "được".)
+        if compose(keys).text != keys {
+            return None;
+        }
+        let text = keys.to_string();
+        let t = &self.tuning;
+        // English words that are also bare syllables ("the", "do", "can").
+        if self.en.log_freq(keys).is_some_and(|f| f >= t.restore_english) {
+            return None;
+        }
+        // A capitalised word may well be a name written without accents
+        // ("Tuan", "Hung"); missing "Khong" at the start of a sentence is the
+        // smaller loss.
+        if word.chars().next().is_some_and(char::is_uppercase) {
+            return None;
+        }
+        let ctx = self.context_of(prev);
+        let score = |id: u32, f: f64| {
+            let bigram = ctx.vi.and_then(|p| self.vi_bigrams.ln_prob(p, id));
+            self.with_context(f, bigram)
+        };
+        let typed = match (self.vi.id(&text), self.vi.log_freq(&text)) {
+            (Some(id), Some(f)) => score(id, f),
+            _ => UNSEEN_SYLLABLE,
+        };
+        let mut candidates: Vec<(&str, f64)> = self
+            .bare_index
+            .get(&text)?
+            .iter()
+            .filter_map(|&id| {
+                let (w, f) = &self.vi.words()[id as usize];
+                (*w != text).then(|| (w.as_str(), score(id, *f)))
+            })
+            .collect();
+        candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let (best, best_score) = *candidates.first()?;
+        let runner_up = candidates.get(1).map_or(f64::NEG_INFINITY, |c| c.1);
+        (best_score - typed >= t.restore_margin && best_score - runner_up >= t.restore_ambiguity)
+            .then(|| match_case(word, best))
     }
 
     /// Lowercase keys of `word` if it is worth scoring at all.
@@ -344,6 +415,10 @@ impl Corrector for SmartCorrector {
         self.english = english;
     }
 
+    fn set_restore_marks(&mut self, on: bool) {
+        self.restore = on;
+    }
+
     fn correct(&self, word: &str) -> Option<String> {
         self.correct_after(word, None)
     }
@@ -353,6 +428,11 @@ impl Corrector for SmartCorrector {
         if self.english {
             if let Some(fix) = self.misspellings.get(&keys) {
                 return Some(match_case(word, fix));
+            }
+        }
+        if self.vietnamese && self.restore {
+            if let Some(fix) = self.restore_marks(word, &keys, prev) {
+                return Some(fix);
             }
         }
         let (typed, vietnamese) = self.typed(&keys);
@@ -539,6 +619,33 @@ mod tests {
             }
             println!("{w:>10}: {:>7.1} us/word", start.elapsed().as_secs_f64() * 1e6 / 100.0);
         }
+    }
+
+    /// "khong" is a real (if rare) word in the corpora, yet after "tôi" it
+    /// can only be "không".
+    #[test]
+    fn restores_marks_of_a_bare_word() {
+        let c = corrector();
+        assert_eq!(c.correct_after("khong", Some("tôi")).as_deref(), Some("không"));
+        assert_eq!(c.correct_after("duoc", Some("không")).as_deref(), Some("được"));
+    }
+
+    #[test]
+    fn restoring_marks_is_careful() {
+        let mut c = corrector();
+        // Already has its marks, or is an English word, or is a name.
+        assert_eq!(c.correct_after("không", Some("tôi")), None);
+        assert_eq!(c.correct("the"), None);
+        assert_eq!(c.correct_after("Nguyen", Some("anh")), None);
+        assert_eq!(c.correct("Khong"), None); // could be a name: leave capitals alone
+        // Too many accented forms, none clearly the one.
+        assert_eq!(c.correct("ban"), None);
+        // Switched off, or in English mode.
+        c.set_restore_marks(false);
+        assert_eq!(c.correct_after("khong", Some("tôi")), None);
+        c.set_restore_marks(true);
+        c.set_languages(false, true);
+        assert_eq!(c.correct_after("khong", Some("tôi")), None);
     }
 
     #[test]

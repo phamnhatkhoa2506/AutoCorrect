@@ -3,6 +3,7 @@
 //!     cargo run -p ac-bench --release -- [--sentences N] [--rate R] [--seed S] [--show N]
 //!         [--floor F --margin M --ambiguity A --known K --rare P --weight W --language L]
 //!         [--far-floor F --far-ambiguity A --no-list]
+//!         [--bare R --restore-margin M --restore-ambiguity A --restore-english E]
 //!     cargo run -p ac-bench --release -- --journal [file]   (report on your own journal)
 //!
 //! Every word of real sentences (never seen in training: the last
@@ -25,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use ac_core::{Bigrams, Corrector, Lexicon, SmartCorrector, Tuning, HELD_OUT_SENTENCES};
+use ac_telex::syllable::split_tone;
 use ac_telex::{canonical, to_keys};
 use unicode_normalization::UnicodeNormalization;
 
@@ -61,6 +63,20 @@ struct Word {
     prev: Option<String>,
     /// Written with a capital first letter (names, sentence starts).
     capital: bool,
+}
+
+/// A Vietnamese word typed without any marks: "không" -> "khong".
+fn bare(text: &str) -> String {
+    text.chars()
+        .map(|c| match split_tone(c).0 {
+            'ă' | 'â' => 'a',
+            'ê' => 'e',
+            'ô' | 'ơ' => 'o',
+            'ư' => 'u',
+            'đ' => 'd',
+            other => other,
+        })
+        .collect()
 }
 
 /// The keys as the user types them: capital first letter when the word has one.
@@ -243,13 +259,16 @@ struct Case<'a> {
     word: &'a Word,
     /// The keys actually typed when this word got a typo.
     typed: Option<String>,
+    /// `typed` is the word without its marks, not a slip.
+    bare: bool,
 }
 
-/// (correct words, false corrections), typos with one slip, with two.
-fn run(corrector: &SmartCorrector, cases: &[Case], show: usize) -> ((u32, u32), Typos, Typos) {
+/// (correct words, false corrections), typos with one slip, with two, and
+/// words typed without their marks.
+fn run(corrector: &SmartCorrector, cases: &[Case], show: usize) -> ((u32, u32), Typos, Typos, Typos) {
     let mut shown = [0usize; 2];
     let (mut clean, mut false_fix) = (0, 0);
-    let (mut one, mut two) = (Typos::default(), Typos::default());
+    let (mut one, mut two, mut stripped) = (Typos::default(), Typos::default(), Typos::default());
     for case in cases {
         let prev = case.word.prev.as_deref();
         match &case.typed {
@@ -265,7 +284,13 @@ fn run(corrector: &SmartCorrector, cases: &[Case], show: usize) -> ((u32, u32), 
                 }
             }
             Some(typed) => {
-                let tally = if is_two_slips(&case.word.keys, typed) { &mut two } else { &mut one };
+                let tally = if case.bare {
+                    &mut stripped
+                } else if is_two_slips(&case.word.keys, typed) {
+                    &mut two
+                } else {
+                    &mut one
+                };
                 tally.n += 1;
                 let typed_keys = typed_as(typed, case.word.capital);
                 match corrector.correct_after(&typed_keys, prev) {
@@ -286,7 +311,7 @@ fn run(corrector: &SmartCorrector, cases: &[Case], show: usize) -> ((u32, u32), 
             }
         }
     }
-    ((clean, false_fix), one, two)
+    ((clean, false_fix), one, two, stripped)
 }
 
 fn held_out(raw: &Path, dir: &str, limit: usize) -> Vec<String> {
@@ -364,6 +389,7 @@ fn main() {
     let rate = flag("--rate", 0.15);
     let seed = flag("--seed", 7.0) as u64;
     let show = flag("--show", 0.0) as usize;
+    let bare_rate = flag("--bare", 0.05);
     let d = Tuning::default();
     let tuning = Tuning {
         known_word: flag("--known", d.known_word),
@@ -376,6 +402,9 @@ fn main() {
         far_ambiguity: flag("--far-ambiguity", d.far_ambiguity),
         bigram_weight: flag("--weight", d.bigram_weight),
         language_penalty: flag("--language", d.language_penalty),
+        restore_margin: flag("--restore-margin", d.restore_margin),
+        restore_ambiguity: flag("--restore-ambiguity", d.restore_ambiguity),
+        restore_english: flag("--restore-english", d.restore_english),
     };
 
     let root: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -411,20 +440,28 @@ fn main() {
             .iter()
             .map(|word| {
                 let double = rng.chance(0.2);
+                // Some words are typed without marks instead of with a slip.
+                let stripped = language == Language::Vietnamese && !word.text.is_ascii() && rng.chance(bare_rate);
+                if stripped {
+                    return Case { word, typed: Some(bare(&word.text)), bare: true };
+                }
                 let typed = rng.chance(rate).then(|| typo(&word.keys, language, double, &mut rng)).flatten();
-                Case { word, typed }
+                Case { word, typed, bare: false }
             })
             .collect();
         println!("\n== {name}: {} words, {} with typos ==", all.len(), cases.iter().filter(|c| c.typed.is_some()).count());
         for (label, context) in [("no context  ", false), ("with context", true)] {
             corrector.set_context(context);
-            let ((clean, false_fix), one, two) = run(&corrector, &cases, if context { show } else { 0 });
+            let ((clean, false_fix), one, two, stripped) = run(&corrector, &cases, if context { show } else { 0 });
             println!(
                 "{label}: {clean} correct words, {false_fix} changed ({:.2} per 1000)",
                 1000.0 * f64::from(false_fix) / f64::from(clean.max(1))
             );
             println!("              one slip : {}", one.row());
             println!("              two slips: {}", two.row());
+            if stripped.n > 0 {
+                println!("              no marks : {}", stripped.row());
+            }
         }
     }
     println!("\n({:.0}s)", started.elapsed().as_secs_f64());

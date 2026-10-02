@@ -24,11 +24,13 @@ pub struct Settings {
     pub code_english: bool,
     /// Work around inline completion in browser address and search boxes.
     pub autocomplete_guard: bool,
+    /// Give Vietnamese words typed without marks their marks (khong -> không).
+    pub restore_marks: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { vietnamese: true, corrections: true, paused: false, journal: false, code_english: false, autocomplete_guard: true }
+        Self { vietnamese: true, corrections: true, paused: false, journal: false, code_english: false, autocomplete_guard: true, restore_marks: true }
     }
 }
 
@@ -56,6 +58,7 @@ pub fn load() -> Settings {
             "journal" => s.journal = on,
             "code_english" => s.code_english = on,
             "autocomplete_guard" => s.autocomplete_guard = on,
+            "restore_marks" => s.restore_marks = on,
             _ => {}
         }
     }
@@ -66,13 +69,14 @@ pub fn save(s: &Settings) {
     let Some(path) = path() else { return };
     let flag = |b: bool| if b { 1 } else { 0 };
     let text = format!(
-        "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\nautocomplete_guard={}\n",
+        "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\n",
         flag(s.vietnamese),
         flag(s.corrections),
         flag(s.paused),
         flag(s.journal),
         flag(s.code_english),
-        flag(s.autocomplete_guard)
+        flag(s.autocomplete_guard),
+        flag(s.restore_marks)
     );
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);

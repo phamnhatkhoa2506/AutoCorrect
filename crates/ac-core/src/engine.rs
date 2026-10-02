@@ -138,6 +138,11 @@ impl<C: Corrector> Engine<C> {
         }
     }
 
+    /// Give Vietnamese words typed without marks ("khong") their marks.
+    pub fn set_restore_marks(&mut self, on: bool) {
+        self.corrector.set_restore_marks(on);
+    }
+
     pub fn set_vietnamese(&mut self, on: bool) {
         self.vietnamese = on;
         self.sync_corrector();

@@ -42,6 +42,7 @@ const ID_AUTOSTART: usize = 4;
 const ID_JOURNAL: usize = 5;
 const ID_CODE_ENGLISH: usize = 6;
 const ID_GUARD: usize = 7;
+const ID_RESTORE: usize = 8;
 const ID_EXIT: usize = 9;
 
 thread_local! {
@@ -148,6 +149,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             ID_JOURNAL => hook::update(|s| s.journal = !s.journal),
             ID_CODE_ENGLISH => hook::update(|s| s.code_english = !s.code_english),
             ID_GUARD => hook::update(|s| s.autocomplete_guard = !s.autocomplete_guard),
+            ID_RESTORE => hook::update(|s| s.restore_marks = !s.restore_marks),
             ID_AUTOSTART => settings::set_autostart(!settings::autostart()),
             ID_EXIT => PostQuitMessage(0),
             _ => {}
@@ -164,12 +166,13 @@ unsafe fn show_menu(hwnd: HWND) {
     let s = hook::settings();
     let Ok(menu) = CreatePopupMenu() else { return };
     let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
-    let items: [(usize, PCWSTR, bool); 7] = [
+    let items: [(usize, PCWSTR, bool); 8] = [
         (ID_VIETNAMESE, w!("Tiếng Việt (Telex)\tAlt+Z"), s.vietnamese),
         (ID_CORRECTIONS, w!("Tự sửa lỗi gõ"), s.corrections),
         (ID_PAUSED, w!("Tạm dừng"), s.paused),
         (ID_AUTOSTART, w!("Khởi động cùng Windows"), settings::autostart()),
         (ID_CODE_ENGLISH, w!("Sửa lỗi tiếng Anh cả trong IDE/terminal"), s.code_english),
+        (ID_RESTORE, w!("Tự thêm dấu khi gõ không dấu (khong → không)"), s.restore_marks),
         (ID_GUARD, w!("Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm"), s.autocomplete_guard),
         (ID_JOURNAL, w!("Ghi nhật ký sửa lỗi (để tinh chỉnh)"), s.journal),
     ];
