@@ -182,6 +182,9 @@ Chính sách mặc định theo app:
   - Phát hiện khi chữ bị đổi lại sau khi mình sửa (đọc lại qua UI Automation), rồi cảnh báo hoặc tự tắt sửa trong app đó.
 - **Hoàn tác bằng Backspace dễ bị kích hoạt nhầm** (người dùng bấm Backspace để xóa tiếp). Cách xử lý: một lần hoàn tác chỉ giữ nguyên từ ngay lúc đó; phải hoàn tác 2 lần thì mới bỏ qua từ đó cả phiên.
 - **Backspace lùi qua dấu cách vào từ trước**: phải khôi phục từ trước vào buffer. Nếu lùi vào đoạn chữ không biết thì đánh dấu `Untracked` và không sửa, vì buffer có thể chỉ chứa phần đuôi của từ trên màn hình (`xteh` có thể bị sửa thành `xthe`).
+- **Sự kiện foreground của WinEvent có thể đến sai thứ tự** (bấm taskbar báo `explorer.exe` sau app thật): hook tự phân loại lại cửa sổ thật mỗi khi foreground đổi.
+- **"Hiện mật khẩu" biến ô mật khẩu thành ô chữ thường**: nhớ các ô từng bị che (process + AutomationId + tên) và nhận diện theo nhãn (password, pwd, mật khẩu…).
+- **Phím hủy dấu không liền kề** (`rece` → `rêc` rồi thêm `e`): hiện lại đúng mọi phím đã gõ, không làm mất chữ.
 - **Không tự động test bằng cách giả lập gõ phím lên desktop thật**, vì phím có thể rơi vào cửa sổ khác. Test E2E phải dùng một cửa sổ test riêng do chính app tạo, và kiểm tra đúng cửa sổ đó đang được focus trước mỗi lần gửi phím.
 
 ---
