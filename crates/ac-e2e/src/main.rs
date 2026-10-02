@@ -16,6 +16,7 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
@@ -38,7 +39,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow, GetMessageW,
     PostThreadMessageW, RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowsHookExW, ShowWindow,
     TranslateMessage, UnhookWindowsHookEx, MSG, SW_SHOW, WH_KEYBOARD_LL, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_APP, WM_GETTEXT, WM_GETTEXTLENGTH, WM_QUIT, WM_SETTEXT, WNDCLASSW, WS_CHILD,
+    WINDOW_STYLE, WM_APP, WM_GETTEXT, WM_GETTEXTLENGTH, WM_QUIT, WM_SETFOCUS, WM_SETTEXT, WNDCLASSW, WS_CHILD,
     WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
@@ -46,6 +47,8 @@ const WM_JOB: u32 = WM_APP + 9;
 /// Edit control message: select a character range (here: place the caret).
 const EM_SETSEL: u32 = 0x00B1;
 static JOBS: Mutex<VecDeque<Box<dyn FnOnce() + Send>>> = Mutex::new(VecDeque::new());
+/// The edit box, so that the top-level window can hand the keyboard focus on.
+static EDIT: AtomicIsize = AtomicIsize::new(0);
 
 /// What the driver thread controls.
 #[derive(Clone, Copy)]
@@ -94,6 +97,28 @@ impl Window {
             let end = text.encode_utf16().count();
             SendMessageW(self.edit(), EM_SETSEL, Some(WPARAM(end)), Some(LPARAM(end as isize)));
         }
+    }
+
+    /// The text once it has stopped changing for 300 ms. Keys typed faster
+    /// than the replacements are made queue up and are still being worked off
+    /// after the last one was sent.
+    fn settled_text(&self) -> String {
+        let mut last = self.text();
+        let mut stable = 0;
+        for _ in 0..80 {
+            thread::sleep(Duration::from_millis(50));
+            let now = self.text();
+            if now == last {
+                stable += 1;
+                if stable >= 6 {
+                    break;
+                }
+            } else {
+                stable = 0;
+                last = now;
+            }
+        }
+        last
     }
 
     fn in_front(&self) -> bool {
@@ -205,7 +230,12 @@ fn settings(vietnamese: bool) -> Settings {
 fn run(window: &Window, s: &Scenario) -> std::result::Result<String, String> {
     let settings = s.settings;
     let personal = s.personal;
+    let edit = window.edit;
     window.on_main(move || {
+        // Typed keys go to the focused window: make sure that is the edit box.
+        unsafe {
+            let _ = SetFocus(Some(HWND(edit as _)));
+        }
         hook::update(|current| *current = settings);
         hook::set_personal(Personal::parse(personal));
         hook::reset_engine();
@@ -221,8 +251,7 @@ fn run(window: &Window, s: &Scenario) -> std::result::Result<String, String> {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    thread::sleep(Duration::from_millis(150));
-    Ok(window.text())
+    Ok(window.settled_text())
 }
 
 fn text(t: &str, gap: u64) -> Step {
@@ -255,7 +284,9 @@ fn scenarios(folder: &str) -> Vec<Scenario> {
         plain("Telex: words typed without marks", true, vec![text("tooi khong ", 30)], "tôi không "),
         plain("Telex: an ambiguous bare word is left alone", true, vec![text("ban ", 30)], "ban "),
         plain("Ctrl+Z undoes the fix and keeps the space", false, vec![text("teh ", 30), Step::CtrlZ], "teh "),
-        plain("Ctrl+Z with nothing to undo changes nothing", false, vec![text("abc", 30), Step::CtrlZ], "abc"),
+        // Not ours to take: the edit box undoes its own typing, which proves
+        // that the key reached it.
+        plain("Ctrl+Z with nothing to undo is the program's own", false, vec![text("abc", 30), Step::CtrlZ], ""),
         plain("Backspace only edits (no undo)", false, vec![text("teh ", 30), Step::Backspace, text("m", 30)], "them"),
         plain("Several Backspaces keep editing", false, vec![text("teh ", 30), Step::Backspace, Step::Backspace], "th"),
         Scenario {
@@ -278,6 +309,15 @@ fn scenarios(folder: &str) -> Vec<Scenario> {
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if msg == WM_SETFOCUS {
+        // A plain window keeps the focus for itself: pass it to the edit box
+        // (the first keys of the first scenario were lost to this).
+        let edit = EDIT.load(Ordering::Relaxed);
+        if edit != 0 {
+            let _ = SetFocus(Some(HWND(edit as _)));
+            return LRESULT(0);
+        }
+    }
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
 
@@ -330,6 +370,7 @@ fn main() -> Result<()> {
             Some(instance),
             None,
         )?;
+        EDIT.store(edit.0 as isize, Ordering::Relaxed);
         // Inline completion of folder names, like a browser address bar.
         let _ = SHAutoComplete(edit, SHACF_FILESYS_DIRS | SHACF_AUTOAPPEND_FORCE_ON);
 
