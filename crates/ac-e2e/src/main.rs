@@ -402,6 +402,11 @@ fn main() -> Result<()> {
     let list = scenarios(&folder);
     let driver = thread::spawn(move || {
         thread::sleep(Duration::from_millis(800));
+        // Warm-up: the first key into a fresh edit box with inline completion
+        // was sometimes swallowed by the control itself (the hook had seen it).
+        let _ = window.type_text("x", 40);
+        thread::sleep(Duration::from_millis(600));
+        window.set_text("");
         let mut failures = 0;
         println!("{:<52} result", "scenario");
         for s in &list {
