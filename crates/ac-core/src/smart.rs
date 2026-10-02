@@ -17,6 +17,7 @@ use crate::bigrams::Bigrams;
 use crate::corrector::{match_case, Corrector};
 use crate::edits::{bag_distance, edits1, letter_counts, slip_cost, FAR_MAX_COST};
 use crate::lexicon::Lexicon;
+use crate::personal::Personal;
 
 /// Score of a well-formed Vietnamese syllable missing from the lexicon
 /// (about 20 per billion).
@@ -117,6 +118,8 @@ pub struct SmartCorrector {
     tuning: Tuning,
     /// Known misspellings and their fixes (English), checked first.
     misspellings: HashMap<String, String>,
+    /// The user's own words to ignore and replacements, checked before all.
+    personal: Personal,
 }
 
 /// Scores behind a decision, for diagnostics.
@@ -155,7 +158,17 @@ impl SmartCorrector {
             bare_index,
             tuning: Tuning::default(),
             misspellings: HashMap::new(),
+            personal: Personal::default(),
         }
+    }
+
+    pub fn set_personal(&mut self, personal: Personal) {
+        self.personal = personal;
+    }
+
+    /// Never correct `word` again (learned from the user undoing it).
+    pub fn add_ignore(&mut self, word: &str) {
+        self.personal.add_ignore(word);
     }
 
     /// Adds a `typo<TAB>fix` list of common misspellings. These are fixed
@@ -424,6 +437,14 @@ impl Corrector for SmartCorrector {
     }
 
     fn correct_after(&self, word: &str, prev: Option<&str>) -> Option<String> {
+        // The user's own dictionary comes first, for words of any length.
+        let lower = word.to_lowercase();
+        if let Some(instead) = self.personal.fix(&lower) {
+            return Some(match_case(word, instead));
+        }
+        if self.personal.ignores(&lower) {
+            return None;
+        }
         let keys = Self::keys_of(word)?;
         if self.english {
             if let Some(fix) = self.misspellings.get(&keys) {
@@ -646,6 +667,20 @@ mod tests {
         c.set_restore_marks(true);
         c.set_languages(false, true);
         assert_eq!(c.correct_after("khong", Some("tôi")), None);
+    }
+
+    #[test]
+    fn personal_dictionary_comes_first() {
+        let mut c = corrector();
+        assert_eq!(c.correct("teh").as_deref(), Some("the"));
+        c.set_personal(Personal::parse("ignore\tteh\nfix\tko\tkhông\nfix\tcty\tcông ty\n"));
+        assert_eq!(c.correct("teh"), None); // ignored
+        assert_eq!(c.correct("Teh"), None);
+        assert_eq!(c.correct("ko").as_deref(), Some("không")); // short words too
+        assert_eq!(c.correct("Cty").as_deref(), Some("Công ty"));
+        // A learned word is ignored from then on.
+        c.add_ignore("recieve");
+        assert_eq!(c.correct("recieve"), None);
     }
 
     #[test]

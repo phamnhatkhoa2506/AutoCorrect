@@ -8,10 +8,12 @@ mod corrector;
 mod edits;
 mod engine;
 mod lexicon;
+mod personal;
 mod smart;
 
 pub use bigrams::{Bigrams, HELD_OUT_SENTENCES};
 pub use corrector::{Corrector, DictCorrector};
 pub use engine::{Action, Decision, Engine, Key};
 pub use lexicon::Lexicon;
+pub use personal::Personal;
 pub use smart::{Ranking, SmartCorrector, Tuning};

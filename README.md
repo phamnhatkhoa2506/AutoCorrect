@@ -26,7 +26,7 @@ eleaseutocorrect.exe --en       # khởi động ở chế độ Anh
 `autocorrect` **là bộ gõ Telex luôn**: thoát hẳn Unikey/EVKey trước khi chạy (hai bộ gõ cùng lúc sẽ đánh nhau). Chỉ chạy được 1 bản cùng lúc.
 
 - **Icon khay**: `V` đỏ = tiếng Việt, `E` xanh = tiếng Anh, `–` xám = tạm dừng. Bấm trái để chuyển Việt/Anh (hoặc **Alt+Z**).
-- **Menu chuột phải**: Tiếng Việt, Tự sửa lỗi gõ, Tạm dừng, Khởi động cùng Windows, Sửa lỗi tiếng Anh cả trong IDE/terminal, Tự thêm dấu khi gõ không dấu, Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm, Ghi nhật ký sửa lỗi, Thoát.
+- **Menu chuột phải**: Tiếng Việt, Tự sửa lỗi gõ, Tạm dừng, Khởi động cùng Windows, Sửa lỗi tiếng Anh cả trong IDE/terminal, Tự thêm dấu khi gõ không dấu, Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm, Ghi nhật ký sửa lỗi, Mở từ điển cá nhân, Thoát.
 - Cài đặt được lưu ở `%APPDATA%\AutoCorrect\settings.ini`.
 
 ### Theo từng app
@@ -106,6 +106,19 @@ Kết quả (1200 câu mỗi ngôn ngữ), trước và sau Phase 3:
 ### Nhật ký để tinh chỉnh bằng dữ liệu thật
 
 Menu khay có mục **Ghi nhật ký sửa lỗi** (mặc định tắt). Khi bật, mỗi lần app sửa một từ hoặc bạn hoàn tác, một dòng được ghi vào `%APPDATA%\AutoCorrect\journal.tsv` (`giây\tFIX|UNDO\tphím đã gõ\ttừ sửa\ttừ trước đó`). File chỉ nằm trên máy bạn, không bao giờ gửi đi; xóa tùy ý. Xem báo cáo: `cargo run -p ac-bench --release -- --journal`.
+
+## Từ điển cá nhân
+
+Menu khay → **Mở từ điển cá nhân...** mở `%APPDATA%\AutoCorrect\personal.tsv` trong Notepad. Mỗi dòng một mục (dòng bắt đầu bằng `#` là chú thích):
+
+```text
+ignore<TAB>kubectl         không bao giờ tự sửa từ này
+fix<TAB>ko<TAB>không       luôn đổi chữ vừa gõ thành chữ bên phải
+```
+
+Viết đúng như bạn gõ phím (khi gõ tiếng Việt thì là phím Telex), chữ thường. Lưu file rồi chuyển sang cửa sổ khác là app tự nạp lại. Từ điển cá nhân được xét **trước mọi luật khác**, kể cả từ ngắn dưới 3 chữ và trong terminal/IDE.
+
+App cũng **tự học**: khi bạn hoàn tác (Ctrl+Z) cùng một lần sửa hai lần, nó thêm dòng `ignore` cho từ đó vào file, nên không sửa nữa kể cả sau khi khởi động lại. Chỉ những từ bạn tự hoàn tác mới được ghi; file chỉ nằm trên máy bạn.
 
 ## Test tự động có cửa sổ riêng (E2E)
 

@@ -29,6 +29,7 @@ enum Msg {
     Debug(String),
     Info(String),
     Journal(String),
+    Personal(String),
 }
 
 static TX: OnceLock<Sender<Msg>> = OnceLock::new();
@@ -53,6 +54,10 @@ pub fn start(debug: bool) {
                 }
                 Msg::Journal(line) => {
                     append_journal(&line);
+                    continue;
+                }
+                Msg::Personal(line) => {
+                    append_personal(&line);
                     continue;
                 }
             };
@@ -95,6 +100,24 @@ pub fn send(event: Event) {
 
 pub fn debug_enabled() -> bool {
     DEBUG.load(Ordering::Relaxed)
+}
+
+/// One line for the personal dictionary (a word learned from an undo).
+pub fn personal(line: String) {
+    if let Some(tx) = TX.get() {
+        let _ = tx.send(Msg::Personal(line));
+    }
+}
+
+fn append_personal(line: &str) {
+    use std::io::Write;
+    let Some(path) = crate::settings::personal_path() else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{line}");
+    }
 }
 
 /// One line for the local journal (setting `journal`): written off-thread.

@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
 
-use ac_core::{Action, Bigrams, Decision, Engine, Key, Lexicon, SmartCorrector};
+use ac_core::{Action, Bigrams, Decision, Engine, Key, Lexicon, Personal, SmartCorrector};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LCONTROL,
@@ -30,6 +30,8 @@ struct State {
     app: AppKind,
     /// The foreground program completes text inline (browsers, search box).
     guard: bool,
+    /// Modification time of the personal dictionary as last read.
+    personal_stamp: Option<std::time::SystemTime>,
 }
 
 impl State {
@@ -45,6 +47,19 @@ impl State {
         self.engine.set_restore_marks(s.corrections && s.restore_marks && self.app == AppKind::Normal);
     }
 
+    /// Re-reads the personal dictionary when its file changed (it is edited
+    /// in Notepad, or appended to by a learned word).
+    fn reload_personal(&mut self) {
+        let Some(path) = crate::settings::personal_path() else { return };
+        let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        if stamp == self.personal_stamp {
+            return;
+        }
+        self.personal_stamp = stamp;
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        self.engine.corrector_mut().set_personal(Personal::parse(&text));
+    }
+
     /// Keys must pass through untouched and nothing may be remembered.
     fn hands_off(&self) -> bool {
         self.settings.paused || self.app == AppKind::Off || focus::password()
@@ -58,6 +73,7 @@ thread_local! {
         settings: Settings::default(),
         app: AppKind::Normal,
         guard: false,
+        personal_stamp: None,
     });
 }
 
@@ -79,6 +95,18 @@ pub fn init(settings: Settings) {
         let mut state = cell.borrow_mut();
         state.settings = settings;
         state.apply();
+        state.reload_personal();
+    });
+}
+
+/// Replaces the personal dictionary (end-to-end scenarios); the file on disk
+/// is then not re-read until it changes again.
+pub fn set_personal(personal: Personal) {
+    STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        state.personal_stamp = crate::settings::personal_path()
+            .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+        state.engine.corrector_mut().set_personal(personal);
     });
 }
 
@@ -114,6 +142,7 @@ pub fn set_app(kind: AppKind, name: &str) {
     STATE.with(|cell| {
         let Ok(mut state) = cell.try_borrow_mut() else { return };
         state.guard = autocomplete_guard(name);
+        state.reload_personal();
         if state.app != kind {
             state.app = kind;
             state.apply();
@@ -193,6 +222,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             let name = focus::process_name(foreground.0 as isize);
             let kind = classify(&name);
             state.guard = autocomplete_guard(&name);
+            state.reload_personal();
             if state.app != kind {
                 state.app = kind;
                 state.apply();
@@ -210,6 +240,11 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let pending = state.engine.last_correction().map(|(k, f)| (k.to_string(), f.to_string()));
         let action = state.engine.on_key(key);
         let guard = state.guard && state.settings.autocomplete_guard;
+        if let Some(word) = state.engine.take_learned() {
+            // Undone twice: remember for good, and ignore from now on.
+            state.engine.corrector_mut().add_ignore(&word);
+            log::personal(format!("ignore\t{word}"));
+        }
         if state.settings.journal && matches!(action, Action::Replace { .. } | Action::ReplaceThenPass { .. }) {
             let entry = match key {
                 Key::Space | Key::Punct(_) => state.engine.last_correction().map(|(k, f)| ("FIX", k.to_string(), f.to_string())),

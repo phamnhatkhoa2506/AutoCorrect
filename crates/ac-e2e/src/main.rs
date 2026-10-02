@@ -22,6 +22,7 @@ use std::thread;
 use std::time::Duration;
 
 use ac_platform_win::settings::Settings;
+use ac_platform_win::Personal;
 use ac_platform_win::{hook, log};
 use windows::core::{w, Result};
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, WPARAM};
@@ -185,6 +186,8 @@ struct Scenario {
     start: String,
     steps: Vec<Step>,
     expect: String,
+    /// Contents of the personal dictionary for this scenario.
+    personal: &'static str,
 }
 
 fn settings(vietnamese: bool) -> Settings {
@@ -201,8 +204,10 @@ fn settings(vietnamese: bool) -> Settings {
 
 fn run(window: &Window, s: &Scenario) -> std::result::Result<String, String> {
     let settings = s.settings;
+    let personal = s.personal;
     window.on_main(move || {
         hook::update(|current| *current = settings);
+        hook::set_personal(Personal::parse(personal));
         hook::reset_engine();
     });
     window.set_text(&s.start);
@@ -238,6 +243,7 @@ fn scenarios(folder: &str) -> Vec<Scenario> {
         start: String::new(),
         steps,
         expect: expect.to_string(),
+        personal: "",
     };
     let sep = std::path::MAIN_SEPARATOR;
     vec![
@@ -253,11 +259,20 @@ fn scenarios(folder: &str) -> Vec<Scenario> {
         plain("Backspace only edits (no undo)", false, vec![text("teh ", 30), Step::Backspace, text("m", 30)], "them"),
         plain("Several Backspaces keep editing", false, vec![text("teh ", 30), Step::Backspace, Step::Backspace], "th"),
         Scenario {
+            personal: "fix\tko\tkhông",
+            ..plain("Personal dictionary: a fix replaces what was typed", false, vec![text("ko ", 30)], "không ")
+        },
+        Scenario {
+            personal: "ignore\tteh",
+            ..plain("Personal dictionary: an ignored word is left alone", false, vec![text("teh ", 30)], "teh ")
+        },
+        Scenario {
             name: "Inline completion, guard on: tôi, not toôi",
             settings: settings(true),
             start: format!("{folder}{sep}"),
             steps: completion_steps(),
             expect: format!("{folder}{sep}tô"),
+            personal: "",
         },
     ]
 }
@@ -373,6 +388,7 @@ fn main() -> Result<()> {
                 start: guarded.start.clone(),
                 steps: completion_steps(),
                 expect: guarded.expect.clone(),
+                personal: "",
             };
             let label = "Inline completion, guard OFF (informational)";
             match run(&window, &unguarded) {

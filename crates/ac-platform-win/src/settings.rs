@@ -5,6 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use windows::core::{w, HSTRING, PCWSTR};
+use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
 };
@@ -36,6 +38,28 @@ impl Default for Settings {
 
 fn path() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|dir| PathBuf::from(dir).join("AutoCorrect").join("settings.ini"))
+}
+
+/// The user's own dictionary (see `ac_core::Personal`).
+pub fn personal_path() -> Option<PathBuf> {
+    path().map(|p| p.with_file_name("personal.tsv"))
+}
+
+const PERSONAL_HEADER: &str = "# Từ điển cá nhân của AutoCorrect. Lưu file rồi chuyển sang cửa sổ khác: app tự nạp lại.\n#\n# ignore\ttừ              không bao giờ tự sửa từ này\n# fix\tgõ\tthành          luôn đổi chữ vừa gõ thành chữ bên phải\n#\n# Viết đúng như bạn gõ phím (khi gõ tiếng Việt thì là phím Telex), chữ thường.\n# App tự thêm dòng ignore khi bạn hoàn tác (Ctrl+Z) cùng một lần sửa hai lần.\n#\n# Ví dụ:\n# ignore\tkubectl\n# fix\tko\tkhông\n";
+
+/// Opens the personal dictionary in Notepad, creating it first if needed.
+pub fn open_personal() {
+    let Some(path) = personal_path() else { return };
+    if !path.exists() {
+        if let Some(dir) = path.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let _ = fs::write(&path, PERSONAL_HEADER);
+    }
+    let file = HSTRING::from(path.display().to_string());
+    unsafe {
+        ShellExecuteW(None, w!("open"), w!("notepad.exe"), PCWSTR(file.as_ptr()), None, SW_SHOWNORMAL);
+    }
 }
 
 /// Where corrections are journaled when the setting is on.

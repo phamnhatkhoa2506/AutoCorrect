@@ -43,6 +43,7 @@ const ID_JOURNAL: usize = 5;
 const ID_CODE_ENGLISH: usize = 6;
 const ID_GUARD: usize = 7;
 const ID_RESTORE: usize = 8;
+const ID_PERSONAL: usize = 10;
 const ID_EXIT: usize = 9;
 
 thread_local! {
@@ -150,6 +151,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             ID_CODE_ENGLISH => hook::update(|s| s.code_english = !s.code_english),
             ID_GUARD => hook::update(|s| s.autocomplete_guard = !s.autocomplete_guard),
             ID_RESTORE => hook::update(|s| s.restore_marks = !s.restore_marks),
+            ID_PERSONAL => settings::open_personal(),
             ID_AUTOSTART => settings::set_autostart(!settings::autostart()),
             ID_EXIT => PostQuitMessage(0),
             _ => {}
@@ -180,6 +182,7 @@ unsafe fn show_menu(hwnd: HWND) {
         let _ = AppendMenuW(menu, MF_STRING | check(on), id, label);
     }
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+    let _ = AppendMenuW(menu, MF_STRING, ID_PERSONAL, w!("Mở từ điển cá nhân..."));
     let _ = AppendMenuW(menu, MF_STRING, ID_EXIT, w!("Thoát"));
 
     let mut pt = POINT::default();

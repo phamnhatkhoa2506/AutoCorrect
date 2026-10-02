@@ -107,6 +107,8 @@ pub struct Engine<C: Corrector> {
     /// Keys are only followed, not acted on: no Telex, no corrections. Used
     /// while it is not yet known whether a password field has focus.
     observing: bool,
+    /// A word the user has now undone often enough to never correct again.
+    learned: Option<String>,
     last: Option<LastCorrection>,
     /// Keys of the word just restored by an undo: finishing it unchanged
     /// keeps it as is.
@@ -131,6 +133,7 @@ impl<C: Corrector> Engine<C> {
             committed: 0,
             select_all: false,
             observing: false,
+            learned: None,
             last: None,
             just_undone: None,
             undos: HashMap::new(),
@@ -189,6 +192,16 @@ impl<C: Corrector> Engine<C> {
 
     pub fn corrector(&self) -> &C {
         &self.corrector
+    }
+
+    pub fn corrector_mut(&mut self) -> &mut C {
+        &mut self.corrector
+    }
+
+    /// The word the user has just undone for the second time, once: to be
+    /// remembered for good (the engine itself ignores it for the session).
+    pub fn take_learned(&mut self) -> Option<String> {
+        self.learned.take()
     }
 
     /// The word before the current one, as shown on screen.
@@ -334,7 +347,11 @@ impl<C: Corrector> Engine<C> {
             self.clear();
             return Action::Pass;
         };
-        *self.undos.entry(last.original.keys.to_lowercase()).or_default() += 1;
+        let undone = self.undos.entry(last.original.keys.to_lowercase()).or_default();
+        *undone += 1;
+        if *undone == IGNORE_AFTER_UNDOS {
+            self.learned = Some(last.original.keys.to_lowercase());
+        }
         self.just_undone = Some(last.original.keys.clone());
         self.context = last.context.clone();
         if last.delimiter_removed {
@@ -922,6 +939,16 @@ mod tests {
         e.set_observing(false);
         assert!(press(&mut e, "oi").iter().all(|a| *a == Action::Pass));
         assert_eq!(e.current_word(), "tooi");
+    }
+
+    #[test]
+    fn a_word_undone_twice_is_learned_once() {
+        let mut e = engine();
+        type_and_undo(&mut e, "teh");
+        assert_eq!(e.take_learned(), None); // once is not enough
+        type_and_undo(&mut e, "Teh");
+        assert_eq!(e.take_learned().as_deref(), Some("teh"));
+        assert_eq!(e.take_learned(), None); // handed out only once
     }
 
     #[test]
