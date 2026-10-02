@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ac-core", "crates/ac-telex", "crates/ac-data", "crates/ac-platform-win"]
+members = ["crates/ac-core", "crates/ac-telex", "crates/ac-data", "crates/ac-bench", "crates/ac-platform-win"]
 
 [profile.release]
 opt-level = 3

@@ -5,6 +5,11 @@ pub trait Corrector {
     /// `word` is the raw keys typed (Telex keys in Vietnamese mode).
     fn correct(&self, word: &str) -> Option<String>;
 
+    /// Like [`Corrector::correct`], knowing the word typed just before.
+    fn correct_after(&self, word: &str, _prev: Option<&str>) -> Option<String> {
+        self.correct(word)
+    }
+
     /// Which languages corrections may produce (input mode, per-app policy).
     fn set_languages(&mut self, _vietnamese: bool, _english: bool) {}
 }

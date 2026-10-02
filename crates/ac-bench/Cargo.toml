@@ -1,12 +1,8 @@
 [package]
-name = "ac-data"
+name = "ac-bench"
 version = "0.1.0"
 edition = "2021"
 publish = false
-
-[[bin]]
-name = "build-lexicon"
-path = "src/main.rs"
 
 [dependencies]
 ac-core = { path = "../ac-core" }

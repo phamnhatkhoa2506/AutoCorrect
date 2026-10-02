@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
 
-use ac_core::{Action, Decision, Engine, Key, Lexicon, SmartCorrector};
+use ac_core::{Action, Bigrams, Decision, Engine, Key, Lexicon, SmartCorrector};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LCONTROL,
@@ -55,10 +55,14 @@ thread_local! {
 }
 
 fn corrector() -> SmartCorrector {
-    SmartCorrector::new(
-        Lexicon::parse(include_str!("../../../data/vi_syllables.tsv")),
-        Lexicon::parse(include_str!("../../../data/en_words.tsv")),
-    )
+    let vi = Lexicon::parse(include_str!("../../../data/vi_syllables.tsv"));
+    let en = Lexicon::parse(include_str!("../../../data/en_words.tsv"));
+    // Word pairs are built for exactly these lexicons (empty if they differ).
+    let vi_pairs = Bigrams::from_bytes(include_bytes!("../../../data/vi_bigrams.bin"), vi.len());
+    let en_pairs = Bigrams::from_bytes(include_bytes!("../../../data/en_bigrams.bin"), en.len());
+    SmartCorrector::new(vi, en)
+        .with_bigrams(vi_pairs, en_pairs)
+        .with_misspellings(include_str!("../../../data/en_misspellings.tsv"))
 }
 
 /// Builds the engine (parses the lexicons) on the hook thread and applies
@@ -180,12 +184,13 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         }
         let before = state.engine.current_word().to_string();
         let keys = state.engine.current_keys().to_string();
+        let context = state.engine.context().map(str::to_string);
         let action = state.engine.on_key(key);
         if key == Key::Space && log::debug_enabled() {
             let decision = state.engine.last_decision();
-            let mut line = format!("  word on Space: {before:?} (keys {keys:?}) -> {decision:?}");
+            let mut line = format!("  word on Space: {before:?} (keys {keys:?}, after {context:?}) -> {decision:?}");
             if decision == Decision::NoCandidate {
-                if let Some(r) = state.engine.corrector().rank(&keys) {
+                if let Some(r) = state.engine.corrector().rank(&keys, context.as_deref()) {
                     let top: Vec<String> =
                         r.candidates.iter().take(3).map(|(w, s)| format!("{w} {s:.1}")).collect();
                     line += &format!("  (typed {:.1}; top: {})", r.typed, top.join(", "));

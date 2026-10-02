@@ -116,9 +116,121 @@ pub fn edits1(keys: &str) -> Vec<Slip> {
         .collect()
 }
 
+/// Costliest two-slip correction accepted by [`slip_cost`]: two ordinary
+/// slips fit, three never do (the cheapest three cost 10.5).
+pub const FAR_MAX_COST: f64 = 10.4;
+
+/// Longest target [`slip_cost`] handles.
+const MAX_LEN: usize = 31;
+
+/// Letter counts of a lowercase ASCII word, for [`bag_distance`].
+pub fn letter_counts(word: &[u8]) -> [i8; 26] {
+    let mut bag = [0i8; 26];
+    for &b in word.iter().filter(|b| b.is_ascii_lowercase()) {
+        bag[usize::from(b - b'a')] += 1;
+    }
+    bag
+}
+
+/// How many letters differ between two words, ignoring order. Two slips
+/// change at most 4, so anything farther is skipped before the costly
+/// alignment.
+pub fn bag_distance(typed: &[i8; 26], target: &[u8]) -> usize {
+    let mut bag = *typed;
+    for &b in target.iter().filter(|b| b.is_ascii_lowercase()) {
+        bag[usize::from(b - b'a')] -= 1;
+    }
+    bag.iter().map(|c| usize::from(c.unsigned_abs())).sum()
+}
+
+/// Cost of turning the keys `typed` into `target` with the same slip kinds as
+/// [`edits1`] (transposition, neighbouring key, vowel for vowel, a missing,
+/// extra or doubled key), or `None` when that costs more than `limit`.
+/// Optimal string alignment: every slip is cheaper than starting over.
+pub fn slip_cost(typed: &[u8], target: &[u8], limit: f64) -> Option<f64> {
+    const IMPOSSIBLE: f64 = f64::INFINITY;
+    let (n, m) = (typed.len(), target.len());
+    if m > MAX_LEN {
+        return None;
+    }
+    let is_vowel = |c: u8| b"aeiouy".contains(&c);
+    let adjacent = |a: u8, b: u8| neighbours(a as char).contains(b as char);
+    let sub = |a: u8, b: u8| {
+        if a == b {
+            0.0
+        } else if adjacent(a, b) {
+            ADJACENT
+        } else if is_vowel(a) && is_vowel(b) {
+            VOWEL
+        } else {
+            IMPOSSIBLE
+        }
+    };
+    // Extra key (cheaper when it doubled its neighbour) and missing key.
+    let extra = |i: usize| {
+        let c = typed[i];
+        if (i > 0 && typed[i - 1] == c) || typed.get(i + 1) == Some(&c) { DOUBLE } else { EXTRA }
+    };
+    let missing = |j: usize| {
+        let c = target[j];
+        if (j > 0 && target[j - 1] == c) || target.get(j + 1) == Some(&c) { DOUBLE } else { MISSING }
+    };
+
+    // d[i][j]: cost of typed[..i] -> target[..j]; rows i-2, i-1, i kept (on
+    // the stack: this runs against every word of the lexicon).
+    let mut prev2 = [IMPOSSIBLE; MAX_LEN + 1];
+    let mut prev = [0.0; MAX_LEN + 1];
+    for j in 1..=m {
+        prev[j] = prev[j - 1] + missing(j - 1);
+    }
+    let mut cur = [0.0; MAX_LEN + 1];
+    for i in 1..=n {
+        cur[0] = prev[0] + extra(i - 1);
+        let mut row_min = cur[0];
+        for j in 1..=m {
+            let mut best = (prev[j - 1] + sub(typed[i - 1], target[j - 1]))
+                .min(prev[j] + extra(i - 1))
+                .min(cur[j - 1] + missing(j - 1));
+            if i > 1 && j > 1 && typed[i - 1] == target[j - 2] && typed[i - 2] == target[j - 1] && typed[i - 1] != typed[i - 2] {
+                best = best.min(prev2[j - 2] + TRANSPOSE);
+            }
+            cur[j] = best;
+            row_min = row_min.min(best);
+        }
+        if row_min > limit {
+            return None; // every path already costs too much
+        }
+        std::mem::swap(&mut prev2, &mut prev);
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    let cost = prev[m];
+    (cost <= limit).then_some(cost)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn far_slips() {
+        let cost = |a: &str, b: &str| slip_cost(a.as_bytes(), b.as_bytes(), FAR_MAX_COST);
+        assert_eq!(cost("khogn", "khoong"), Some(DOUBLE + TRANSPOSE));
+        assert_eq!(cost("seperate", "separate"), Some(VOWEL));
+        assert_eq!(cost("teh", "the"), Some(TRANSPOSE));
+        assert_eq!(cost("same", "same"), Some(0.0));
+        // Three slips, or a slip of unrelated keys, are out of reach.
+        assert_eq!(cost("kubectl", "cube"), None);
+        assert_eq!(cost("abcdef", "uvwxyz"), None);
+    }
+
+    #[test]
+    fn bag_distance_bounds_two_slips() {
+        let bag = letter_counts(b"khogn");
+        assert_eq!(bag_distance(&bag, b"khoong"), 1); // one letter more
+        assert_eq!(bag_distance(&bag, b"khong"), 0); // transposition
+        assert!(bag_distance(&bag, b"plane") > 4);
+    }
+
 
     fn cost(keys: &str, target: &str) -> Option<f64> {
         edits1(keys)

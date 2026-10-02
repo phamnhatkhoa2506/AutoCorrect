@@ -40,6 +40,8 @@ struct LastCorrection {
     /// The word as it was before the correction.
     original: Word,
     corrected: String,
+    /// The word before it, restored when the correction is undone.
+    context: Option<String>,
 }
 
 /// A word undone this many times is never corrected again this session.
@@ -74,6 +76,10 @@ pub struct Engine<C: Corrector> {
     /// The previous word, followed on screen by one space. Lets a Backspace
     /// over that space resume editing the word.
     prev_word: Option<Word>,
+    /// The finished word before the current one, as shown on screen: what
+    /// the corrector uses to rank candidates. `None` at the start of a line
+    /// or after anything that may have moved the caret.
+    context: Option<String>,
     /// The buffer is not known to hold the whole on-screen word.
     untracked: bool,
     last: Option<LastCorrection>,
@@ -95,6 +101,7 @@ impl<C: Corrector> Engine<C> {
             correct_english: true,
             word: Word::default(),
             prev_word: None,
+            context: None,
             untracked: false,
             last: None,
             just_undone: None,
@@ -144,6 +151,11 @@ impl<C: Corrector> Engine<C> {
         &self.corrector
     }
 
+    /// The word before the current one, as shown on screen.
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+
     pub fn on_key(&mut self, key: Key) -> Action {
         match key {
             Key::Char(c) => {
@@ -155,6 +167,7 @@ impl<C: Corrector> Engine<C> {
             Key::Reset => {
                 self.word = Word::default();
                 self.prev_word = None;
+                self.context = None;
                 self.untracked = false;
                 self.last = None;
                 self.just_undone = None;
@@ -199,10 +212,13 @@ impl<C: Corrector> Engine<C> {
         let word = std::mem::take(&mut self.word);
         self.last = None;
         let untracked = std::mem::take(&mut self.untracked);
+        let context = self.context.take();
         let just_undone = self.just_undone.take().is_some_and(|k| k == word.keys);
         let undos = self.undos.get(&word.keys.to_lowercase()).copied().unwrap_or(0);
         // Only a fully known, non-empty word can be restored on Backspace.
         self.prev_word = (!word.keys.is_empty() && !untracked).then(|| word.clone());
+        // What the next word sees as context: this one, if we know it.
+        self.context = (!word.keys.is_empty() && !untracked).then(|| word.shown.clone());
 
         self.decision = if word.keys.is_empty() {
             Decision::EmptyWord
@@ -215,11 +231,12 @@ impl<C: Corrector> Engine<C> {
         } else if undos >= IGNORE_AFTER_UNDOS {
             Decision::IgnoredAfterUndos(undos)
         } else {
-            match self.corrector.correct(&word.keys) {
+            match self.corrector.correct_after(&word.keys, context.as_deref()) {
                 Some(fix) if fix != word.shown => {
                     let action = replace(&word.shown, &format!("{fix} "));
                     self.prev_word = Some(self.word_showing(&fix));
-                    self.last = Some(LastCorrection { original: word, corrected: fix });
+                    self.context = Some(fix.clone());
+                    self.last = Some(LastCorrection { original: word, corrected: fix, context });
                     self.decision = Decision::Corrected;
                     return action;
                 }
@@ -238,6 +255,7 @@ impl<C: Corrector> Engine<C> {
             let action = replace(&format!("{} ", last.corrected), &last.original.shown);
             self.word = last.original;
             self.prev_word = None;
+            self.context = last.context;
             return action;
         }
         if self.word.shown.pop().is_some() {
@@ -253,6 +271,7 @@ impl<C: Corrector> Engine<C> {
         }
         // Deleting the boundary space: resume the previous word if we know
         // it, otherwise we are now editing text we never saw.
+        self.context = None; // the word before the resumed one is unknown
         match self.prev_word.take() {
             Some(prev) => self.word = prev,
             None => self.untracked = true,
@@ -530,6 +549,58 @@ mod tests {
         assert_eq!(e.last_decision(), Decision::Disabled);
         // Telex composition is unaffected.
         assert_eq!(press(&mut e, "aa"), [Action::Pass, rep(1, "â")]);
+    }
+
+    /// Corrector that only fixes "teh" -> "the" after "in", to see the context.
+    struct AfterIn;
+
+    impl Corrector for AfterIn {
+        fn correct(&self, _word: &str) -> Option<String> {
+            None
+        }
+
+        fn correct_after(&self, word: &str, prev: Option<&str>) -> Option<String> {
+            (word == "teh" && prev == Some("in")).then(|| "the".to_string())
+        }
+    }
+
+    fn type_words(e: &mut Engine<AfterIn>, text: &str) -> Vec<Action> {
+        let mut out = Vec::new();
+        for c in text.chars() {
+            out.push(e.on_key(if c == ' ' { Key::Space } else { Key::Char(c) }));
+        }
+        out
+    }
+
+    #[test]
+    fn corrector_sees_the_previous_word() {
+        let mut e = Engine::new(AfterIn);
+        let actions = type_words(&mut e, "in teh ");
+        assert_eq!(actions.last(), Some(&rep(2, "he ")));
+        assert_eq!(e.context(), Some("the")); // the fix, as on screen
+
+        let mut e = Engine::new(AfterIn);
+        let actions = type_words(&mut e, "on teh ");
+        assert_eq!(actions.last(), Some(&Action::Pass));
+        assert_eq!(e.context(), Some("teh"));
+    }
+
+    #[test]
+    fn context_is_lost_when_the_caret_may_have_moved() {
+        let mut e = Engine::new(AfterIn);
+        type_words(&mut e, "in ");
+        assert_eq!(e.context(), Some("in"));
+        e.on_key(Key::Reset); // click, arrows, Enter...
+        assert_eq!(e.context(), None);
+        assert_eq!(type_words(&mut e, "teh ").last(), Some(&Action::Pass));
+    }
+
+    #[test]
+    fn undo_restores_the_context() {
+        let mut e = Engine::new(AfterIn);
+        type_words(&mut e, "in teh ");
+        e.on_key(Key::Backspace); // undo: "teh" is back, "in" precedes it
+        assert_eq!(e.context(), Some("in"));
     }
 
     #[test]
