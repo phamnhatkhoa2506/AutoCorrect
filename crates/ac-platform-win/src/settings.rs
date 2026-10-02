@@ -17,16 +17,23 @@ pub struct Settings {
     pub corrections: bool,
     /// Everything off: keys pass through untouched.
     pub paused: bool,
+    /// Append every correction and undo to the local journal file.
+    pub journal: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { vietnamese: true, corrections: true, paused: false }
+        Self { vietnamese: true, corrections: true, paused: false, journal: false }
     }
 }
 
 fn path() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|dir| PathBuf::from(dir).join("AutoCorrect").join("settings.ini"))
+}
+
+/// Where corrections are journaled when the setting is on.
+pub fn journal_path() -> Option<PathBuf> {
+    path().map(|p| p.with_file_name("journal.tsv"))
 }
 
 pub fn load() -> Settings {
@@ -41,6 +48,7 @@ pub fn load() -> Settings {
             "vietnamese" => s.vietnamese = on,
             "corrections" => s.corrections = on,
             "paused" => s.paused = on,
+            "journal" => s.journal = on,
             _ => {}
         }
     }
@@ -51,10 +59,11 @@ pub fn save(s: &Settings) {
     let Some(path) = path() else { return };
     let flag = |b: bool| if b { 1 } else { 0 };
     let text = format!(
-        "vietnamese={}\ncorrections={}\npaused={}\n",
+        "vietnamese={}\ncorrections={}\npaused={}\njournal={}\n",
         flag(s.vietnamese),
         flag(s.corrections),
-        flag(s.paused)
+        flag(s.paused),
+        flag(s.journal)
     );
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);

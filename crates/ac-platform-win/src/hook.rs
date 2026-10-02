@@ -185,7 +185,18 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let before = state.engine.current_word().to_string();
         let keys = state.engine.current_keys().to_string();
         let context = state.engine.context().map(str::to_string);
+        let pending = state.engine.last_correction().map(|(k, f)| (k.to_string(), f.to_string()));
         let action = state.engine.on_key(key);
+        if state.settings.journal && matches!(action, Action::Replace { .. }) {
+            let entry = match key {
+                Key::Space => state.engine.last_correction().map(|(k, f)| ("FIX", k.to_string(), f.to_string())),
+                Key::Backspace => pending.map(|(k, f)| ("UNDO", k, f)),
+                _ => None,
+            };
+            if let Some((kind, keys, fix)) = entry {
+                log::journal(format!("{kind}\t{keys}\t{fix}\t{}", context.as_deref().unwrap_or("")));
+            }
+        }
         if key == Key::Space && log::debug_enabled() {
             let decision = state.engine.last_decision();
             let mut line = format!("  word on Space: {before:?} (keys {keys:?}, after {context:?}) -> {decision:?}");

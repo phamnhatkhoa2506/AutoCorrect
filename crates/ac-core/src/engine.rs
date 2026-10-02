@@ -156,6 +156,11 @@ impl<C: Corrector> Engine<C> {
         self.context.as_deref()
     }
 
+    /// The correction a Backspace would undo right now: (keys typed, fix).
+    pub fn last_correction(&self) -> Option<(&str, &str)> {
+        self.last.as_ref().map(|l| (l.original.keys.as_str(), l.corrected.as_str()))
+    }
+
     pub fn on_key(&mut self, key: Key) -> Action {
         match key {
             Key::Char(c) => {

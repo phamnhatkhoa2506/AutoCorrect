@@ -233,7 +233,12 @@ Cần bộ **benchmark offline** (replay chuỗi phím rồi so kết quả) đ�
 - [ ] Benchmark replay và các metric ở mục 7.
 
 ### Phase 2: Ngữ cảnh (3–4 tuần)
-- [ ] KenLM 3-gram tiếng Việt và tiếng Anh, chấm điểm theo noisy channel.
+- [x] Ngữ cảnh từ đứng trước: bảng bigram (2,5 MB Việt, 1,6 MB Anh) từ câu Leipzig, trộn với tần suất đơn từ (`Tuning::bigram_weight`), cộng lực nhất quán ngôn ngữ. Dùng bảng cặp từ thay KenLM 3-gram: đủ cho hiệu quả cần có, nhỏ và đọc thẳng trong bộ nhớ.
+- [x] Benchmark `ac-bench` (câu giữ lại + lỗi nhân tạo, A/B có/không ngữ cảnh, dò ngưỡng); dùng nó để chọn các ngưỡng mặc định.
+- [x] Lỗi hai bước (`khogn` → `không`), danh sách lỗi chính tả phổ biến, tên riêng giữa câu.
+- [x] Nhật ký sửa lỗi tùy chọn (local) + báo cáo `ac-bench --journal`, để lấy dữ liệu thật.
+- [ ] Sửa "sai thành chữ có thật" bằng ngữ cảnh (43% lỗi gõ tiếng Việt rơi vào đây): cần ngưỡng rất chặt và đo trên benchmark trước khi bật.
+- [ ] Khớp chi phí các kiểu gõ nhầm (`crates/ac-core/src/edits.rs`) với nhật ký thật khi đã đủ dữ liệu.
 - [ ] Từ điển cá nhân, tự học từ undo (từ bị undo 2 lần thì không sửa nữa).
 - [ ] UI settings đầy đủ, lịch sử sửa.
 

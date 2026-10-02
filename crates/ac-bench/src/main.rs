@@ -3,6 +3,7 @@
 //!     cargo run -p ac-bench --release -- [--sentences N] [--rate R] [--seed S] [--show N]
 //!         [--floor F --margin M --ambiguity A --known K --rare P --weight W --language L]
 //!         [--far-floor F --far-ambiguity A --no-list]
+//!     cargo run -p ac-bench --release -- --journal [file]   (report on your own journal)
 //!
 //! Every word of real sentences (never seen in training: the last
 //! `HELD_OUT_SENTENCES` lines of each corpus) is typed either correctly or,
@@ -18,6 +19,7 @@
 //! The typo generator is a stand-in for real mistakes: use the numbers to
 //! compare versions, not as a promise of real-world accuracy.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -309,8 +311,52 @@ fn load(root: &Path, tsv: &str, bin: &str) -> (Lexicon, Bigrams) {
     (lexicon, bigrams)
 }
 
+/// Summarises the journal the app writes when "Ghi nhật ký sửa lỗi" is on:
+/// how often corrections are undone, and which ones. A correction that is
+/// undone is the best signal there is that the model was wrong.
+fn journal_report(path: &Path) {
+    let text = fs::read_to_string(path).unwrap_or_default();
+    // (keys, fix) -> (times fixed, times undone)
+    let mut pairs: HashMap<(String, String), (u32, u32)> = HashMap::new();
+    let (mut fixes, mut undos) = (0u32, 0u32);
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let [_, kind, keys, fix, ..] = f[..] else { continue };
+        let e = pairs.entry((keys.to_string(), fix.to_string())).or_default();
+        match kind {
+            "FIX" => {
+                fixes += 1;
+                e.0 += 1;
+            }
+            "UNDO" => {
+                undos += 1;
+                e.1 += 1;
+            }
+            _ => {}
+        }
+    }
+    println!("{}: {fixes} corrections, {undos} undone ({:.1}%)", path.display(), 100.0 * f64::from(undos) / f64::from(fixes.max(1)));
+    let mut by_undos: Vec<_> = pairs.iter().filter(|(_, c)| c.1 > 0).collect();
+    by_undos.sort_by_key(|(_, c)| std::cmp::Reverse((c.1, c.0)));
+    println!("most undone (typed -> fix: undone/fixed):");
+    for ((keys, fix), (made, undone)) in by_undos.into_iter().take(20) {
+        println!("  {keys} -> {fix}: {undone}/{made}");
+    }
+    let mut kept: Vec<_> = pairs.iter().filter(|(_, c)| c.1 == 0).collect();
+    kept.sort_by_key(|(_, c)| std::cmp::Reverse(c.0));
+    println!("most frequent corrections never undone:");
+    for ((keys, fix), (made, _)) in kept.into_iter().take(20) {
+        println!("  {keys} -> {fix}: {made}");
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--journal") {
+        let default = std::env::var("APPDATA").map(|d| PathBuf::from(d).join("AutoCorrect").join("journal.tsv")).unwrap_or_default();
+        journal_report(&args.get(i + 1).map(PathBuf::from).unwrap_or(default));
+        return;
+    }
     let flag = |name: &str, default: f64| {
         args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()).unwrap_or(default)
     };

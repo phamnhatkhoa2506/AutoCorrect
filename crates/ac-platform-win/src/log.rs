@@ -28,6 +28,7 @@ enum Msg {
     Correction(Event),
     Debug(String),
     Info(String),
+    Journal(String),
 }
 
 static TX: OnceLock<Sender<Msg>> = OnceLock::new();
@@ -48,6 +49,10 @@ pub fn start(debug: bool) {
                 }
                 Msg::Info(line) => {
                     println!("{line}");
+                    continue;
+                }
+                Msg::Journal(line) => {
+                    append_journal(&line);
                     continue;
                 }
             };
@@ -90,6 +95,28 @@ pub fn send(event: Event) {
 
 pub fn debug_enabled() -> bool {
     DEBUG.load(Ordering::Relaxed)
+}
+
+/// One line for the local journal (setting `journal`): written off-thread.
+pub fn journal(line: String) {
+    if let Some(tx) = TX.get() {
+        let _ = tx.send(Msg::Journal(line));
+    }
+}
+
+/// `unix_seconds<TAB>FIX|UNDO<TAB>keys<TAB>fix<TAB>previous word`.
+fn append_journal(line: &str) {
+    use std::io::Write;
+    let Some(path) = crate::settings::journal_path() else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{secs}\t{line}");
+    }
 }
 
 /// Always printed (mode changes...).

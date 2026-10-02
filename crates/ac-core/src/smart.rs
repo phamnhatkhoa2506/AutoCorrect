@@ -140,7 +140,7 @@ impl SmartCorrector {
     /// except where the typo is also well-formed Telex.
     pub fn with_misspellings(mut self, tsv: &str) -> Self {
         for line in tsv.lines().filter(|l| !l.starts_with("#")) {
-            let Some((typo, fix)) = line.split_once("	") else { continue };
+            let Some((typo, fix)) = line.split_once("\t") else { continue };
             let (typo, fix) = (typo.trim().to_lowercase(), fix.trim().to_string());
             if typo.len() >= MIN_KEYS && compose(&typo).kind != Kind::Vietnamese {
                 self.misspellings.insert(typo, fix);
