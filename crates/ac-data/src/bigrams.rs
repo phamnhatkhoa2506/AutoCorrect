@@ -56,12 +56,12 @@ pub fn training_sentences(path: &Path) -> std::io::Result<Vec<String>> {
 /// A word of a sentence as its lexicon id (`None`: outside the lexicon), or
 /// a break in the chain (digits, punctuation) after which a new phrase starts.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Token {
+pub enum Token {
     Word(Option<u32>),
     Break,
 }
 
-fn tokens(sentence: &str, language: Language, lexicon: &Lexicon) -> Vec<Token> {
+pub fn tokens(sentence: &str, language: Language, lexicon: &Lexicon) -> Vec<Token> {
     let mut out = Vec::new();
     let mut word = String::new();
     let flush = |word: &mut String, out: &mut Vec<Token>| {

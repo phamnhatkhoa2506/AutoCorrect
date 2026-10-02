@@ -9,6 +9,7 @@
 //! `--cc-by-only` skips FrequencyWords so the output carries no share-alike terms.
 
 mod bigrams;
+mod trigrams;
 
 use std::collections::HashMap;
 use std::fs;
@@ -32,6 +33,12 @@ struct Source {
 }
 
 fn main() -> std::io::Result<()> {
+    if let Some(at) = std::env::args().position(|a| a == "--trigrams") {
+        // Only the triple tables: `--trigrams [min count]`.
+        let min = std::env::args().nth(at + 1).and_then(|v| v.parse().ok()).unwrap_or(3);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        return write_trigrams(&root, &root.join("data/raw"), min);
+    }
     let cc_by_only = std::env::args().any(|a| a == "--cc-by-only");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let raw = root.join("data/raw");
@@ -76,6 +83,30 @@ fn write_bigrams(root: &Path, raw: &Path) -> std::io::Result<()> {
         eprintln!("{code}: counting word pairs...");
         let table = bigrams::build(raw, &corpora, language, &lexicon)?;
         let out = root.join(format!("data/{code}_bigrams.bin"));
+        fs::write(&out, &table)?;
+        eprintln!("wrote {} ({:.1} MB)", out.display(), table.len() as f64 / 1e6);
+    }
+    Ok(())
+}
+
+/// Word-triple tables for the corpora that are present in `data/raw`.
+fn write_trigrams(root: &Path, raw: &Path, min_count: u32) -> std::io::Result<()> {
+    use ac_core::Lexicon;
+    use bigrams::{Corpus, Language};
+
+    let jobs = [
+        ("vi", Language::Vietnamese, vec![Corpus { dir: "vie_news_2022_1M" }, Corpus { dir: "vie-vn_web_2015_1M" }]),
+        ("en", Language::English, vec![Corpus { dir: "eng_news_2023_1M" }]),
+    ];
+    for (code, language, corpora) in jobs {
+        let tsv = root.join(match code {
+            "vi" => "data/vi_syllables.tsv",
+            _ => "data/en_words.tsv",
+        });
+        let lexicon = Lexicon::parse(&fs::read_to_string(tsv)?);
+        eprintln!("{code}: counting word triples...");
+        let table = trigrams::build(raw, &corpora, language, &lexicon, min_count)?;
+        let out = root.join(format!("data/{code}_trigrams.bin"));
         fs::write(&out, &table)?;
         eprintln!("wrote {} ({:.1} MB)", out.display(), table.len() as f64 / 1e6);
     }

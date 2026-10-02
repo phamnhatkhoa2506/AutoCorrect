@@ -413,6 +413,7 @@ fn main() {
         far_floor: flag("--far-floor", d.far_floor),
         far_ambiguity: flag("--far-ambiguity", d.far_ambiguity),
         bigram_weight: flag("--weight", d.bigram_weight),
+        trigram_weight: flag("--tri", d.trigram_weight),
         language_penalty: flag("--language", d.language_penalty),
         phrase_decay: flag("--phrase", d.phrase_decay),
         restore_margin: flag("--restore-margin", d.restore_margin),
@@ -430,7 +431,16 @@ fn main() {
     } else {
         fs::read_to_string(root.join("data/en_misspellings.tsv")).unwrap_or_default()
     };
-    let mut corrector = SmartCorrector::new(vi_lex, en_lex).with_bigrams(vi_bi, en_bi).with_misspellings(&misspellings);
+    let triples = |vocab: usize, bin: &str| {
+        let bytes: &'static [u8] = Box::leak(fs::read(root.join(bin)).unwrap_or_default().into_boxed_slice());
+        ac_core::Trigrams::from_bytes(bytes, vocab)
+    };
+    let (vi_tri, en_tri) = (triples(vi_lex.len(), "data/vi_trigrams.bin"), triples(en_lex.len(), "data/en_trigrams.bin"));
+    println!("trigrams: vi {} triples, en {} triples", vi_tri.len(), en_tri.len());
+    let mut corrector = SmartCorrector::new(vi_lex, en_lex)
+        .with_bigrams(vi_bi, en_bi)
+        .with_trigrams(vi_tri, en_tri)
+        .with_misspellings(&misspellings);
     corrector.set_tuning(tuning);
     println!("{tuning:?}");
 

@@ -14,6 +14,7 @@ use ac_telex::syllable::split_tone;
 use ac_telex::{compose, to_keys, Kind, Tone};
 
 use crate::bigrams::Bigrams;
+use crate::trigrams::Trigrams;
 use crate::corrector::{match_case, Corrector};
 use crate::edits::{bag_distance, edits1, letter_counts, slip_cost, FAR_MAX_COST};
 use crate::lexicon::Lexicon;
@@ -61,6 +62,10 @@ pub struct Tuning {
     /// after "in" is worth more than the word's overall frequency, but a word
     /// never seen after it is not ruled out.
     pub bigram_weight: f64,
+    /// Share of the probability mass the two previous words get, where the
+    /// triple was seen: the rest is the pair-and-frequency estimate. 0 means
+    /// pairs only.
+    pub trigram_weight: f64,
     /// Penalty for a candidate of the other language than the previous word
     /// (an English word after an English word is more likely English).
     pub language_penalty: f64,
@@ -91,6 +96,7 @@ impl Default for Tuning {
             far_floor: 5.5,
             far_ambiguity: 1.0,
             bigram_weight: 0.5,
+            trigram_weight: 0.7,
             language_penalty: 3.0,
             phrase_decay: 0.7,
             restore_margin: 5.0,
@@ -134,6 +140,8 @@ pub struct SmartCorrector {
     en: Lexicon,
     vi_bigrams: Bigrams,
     en_bigrams: Bigrams,
+    vi_trigrams: Trigrams,
+    en_trigrams: Trigrams,
     /// Telex keys of every Vietnamese syllable, by lexicon id (for the
     /// two-slip search).
     vi_keys: Vec<String>,
@@ -165,11 +173,22 @@ pub struct Ranking {
     pub candidates: Vec<(String, f64)>,
 }
 
+/// What the words before say about a candidate: ln P given the previous
+/// word, and given the two previous ones (where those were frequent enough).
+#[derive(Clone, Copy, Default)]
+struct Ngram {
+    bi: Option<f64>,
+    tri: Option<f64>,
+}
+
 /// The previous word, as ids in each lexicon.
 #[derive(Clone, Copy, Default)]
 struct Context {
     vi: Option<u32>,
     en: Option<u32>,
+    /// The word before the previous one.
+    vi2: Option<u32>,
+    en2: Option<u32>,
     /// Which language the phrase leans to: -1 English only ... 1 Vietnamese
     /// only, 0 undecided.
     vote: f64,
@@ -187,6 +206,8 @@ impl SmartCorrector {
             en,
             vi_bigrams: Bigrams::EMPTY,
             en_bigrams: Bigrams::EMPTY,
+            vi_trigrams: Trigrams::EMPTY,
+            en_trigrams: Trigrams::EMPTY,
             vi_keys,
             vietnamese: true,
             english: true,
@@ -227,6 +248,12 @@ impl SmartCorrector {
     }
 
     /// Adds word-pair statistics (see [`Bigrams::from_bytes`]).
+    pub fn with_trigrams(mut self, vi: Trigrams, en: Trigrams) -> Self {
+        self.vi_trigrams = vi;
+        self.en_trigrams = en;
+        self
+    }
+
     pub fn with_bigrams(mut self, vi: Bigrams, en: Bigrams) -> Self {
         self.vi_bigrams = vi;
         self.en_bigrams = en;
@@ -243,7 +270,11 @@ impl SmartCorrector {
             return Context::default();
         };
         let prev = prev.to_lowercase();
-        let mut ctx = Context { vi: self.vi.id(&prev), en: self.en.id(&prev), vote: 0.0 };
+        let mut ctx = Context { vi: self.vi.id(&prev), en: self.en.id(&prev), ..Context::default() };
+        if let Some(before) = history.len().checked_sub(2).map(|i| history[i].to_lowercase()) {
+            ctx.vi2 = self.vi.id(&before);
+            ctx.en2 = self.en.id(&before);
+        }
         // The phrase's language: the previous word counts fully, each word
         // before it a fraction less. Words in both languages say nothing.
         let (mut weight, mut vote) = (1.0, 0.0);
@@ -261,14 +292,29 @@ impl SmartCorrector {
     }
 
     /// ln frequency, raised when the previous word makes it likely.
-    fn with_context(&self, f: f64, bigram: Option<f64>) -> f64 {
-        match bigram {
-            Some(ln_p) => {
-                let w = self.tuning.bigram_weight;
-                let uni = (f - LN_BILLION).exp();
-                (w * ln_p.exp() + (1.0 - w) * uni).ln() + LN_BILLION
-            }
-            None => f,
+    fn with_context(&self, f: f64, ngram: Ngram) -> f64 {
+        if ngram.bi.is_none() && ngram.tri.is_none() {
+            return f;
+        }
+        let uni = (f - LN_BILLION).exp();
+        let w = self.tuning.bigram_weight;
+        let pair = ngram.bi.map_or(uni, |ln_p| w * ln_p.exp() + (1.0 - w) * uni);
+        let t = self.tuning.trigram_weight;
+        let p = ngram.tri.map_or(pair, |ln_p| t * ln_p.exp() + (1.0 - t) * pair);
+        p.ln() + LN_BILLION
+    }
+
+    fn ngram_vi(&self, ctx: Context, id: u32) -> Ngram {
+        Ngram {
+            bi: ctx.vi.and_then(|p| self.vi_bigrams.ln_prob(p, id)),
+            tri: ctx.vi2.zip(ctx.vi).and_then(|(a, b)| self.vi_trigrams.ln_prob(a, b, id)),
+        }
+    }
+
+    fn ngram_en(&self, ctx: Context, id: u32) -> Ngram {
+        Ngram {
+            bi: ctx.en.and_then(|p| self.en_bigrams.ln_prob(p, id)),
+            tri: ctx.en2.zip(ctx.en).and_then(|(a, b)| self.en_trigrams.ln_prob(a, b, id)),
         }
     }
 
@@ -287,14 +333,13 @@ impl SmartCorrector {
     fn readings(&self, keys: &str, english: bool, ctx: Context) -> Vec<(String, f64)> {
         let mut out = Vec::with_capacity(2);
         if let Some(f) = self.en.log_freq(keys).filter(|_| english) {
-            let bigram = ctx.en.zip(self.en.id(keys)).and_then(|(p, w)| self.en_bigrams.ln_prob(p, w));
+            let ngram = self.en.id(keys).map_or(Ngram::default(), |id| self.ngram_en(ctx, id));
             let bias = self.language_bias(ctx, true, self.vi.id(keys).is_some());
-            out.push((keys.to_string(), self.with_context(f, bigram) + bias));
+            out.push((keys.to_string(), self.with_context(f, ngram) + bias));
         }
         if let Some(text) = self.vietnamese_text(keys) {
             if let (Some(f), Some(id)) = (self.vi.log_freq(&text), self.vi.id(&text)) {
-                let bigram = ctx.vi.and_then(|p| self.vi_bigrams.ln_prob(p, id));
-                let f = self.with_context(f, bigram) + self.language_bias(ctx, self.en.id(&text).is_some(), true);
+                let f = self.with_context(f, self.ngram_vi(ctx, id)) + self.language_bias(ctx, self.en.id(&text).is_some(), true);
                 match out.iter_mut().find(|(t, _)| *t == text) {
                     Some(e) => e.1 = e.1.max(f),
                     None => out.push((text, f)),
@@ -334,8 +379,7 @@ impl SmartCorrector {
         }
         let ctx = self.context_of(history);
         let score = |id: u32, f: f64| {
-            let bigram = ctx.vi.and_then(|p| self.vi_bigrams.ln_prob(p, id));
-            self.with_context(f, bigram)
+            self.with_context(f, self.ngram_vi(ctx, id))
         };
         let typed = match (self.vi.id(&text), self.vi.log_freq(&text)) {
             (Some(id), Some(f)) => score(id, f),
@@ -415,7 +459,7 @@ impl SmartCorrector {
         let mut scores: HashMap<String, f64> = HashMap::new();
         // The cheap tests run for every word of both lexicons; the context
         // lookup and the alignment only for the few that survive them.
-        let mut consider = |target: &str, text: &str, f: f64, bigram: &dyn Fn() -> Option<f64>, bias: &dyn Fn() -> f64| {
+        let mut consider = |target: &str, text: &str, f: f64, bigram: &dyn Fn() -> Ngram, bias: &dyn Fn() -> f64| {
             if target.len().abs_diff(typed.len()) > 2 || bag_distance(&typed_bag, target.as_bytes()) > 4 {
                 return;
             }
@@ -426,13 +470,13 @@ impl SmartCorrector {
         };
         if self.english {
             for (id, (word, f)) in self.en.words().iter().enumerate() {
-                let bigram = || ctx.en.and_then(|p| self.en_bigrams.ln_prob(p, id as u32));
+                let bigram = || self.ngram_en(ctx, id as u32);
                 consider(word, word, *f, &bigram, &|| self.language_bias(ctx, true, self.vi.id(word).is_some()));
             }
         }
         if self.vietnamese {
             for (id, (word, f)) in self.vi.words().iter().enumerate() {
-                let bigram = || ctx.vi.and_then(|p| self.vi_bigrams.ln_prob(p, id as u32));
+                let bigram = || self.ngram_vi(ctx, id as u32);
                 consider(&self.vi_keys[id], word, *f, &bigram, &|| self.language_bias(ctx, self.en.id(word).is_some(), true));
             }
         }
@@ -601,9 +645,12 @@ mod tests {
         let en = Lexicon::parse(include_str!("../../../data/en_words.tsv"));
         let vi_pairs = Bigrams::from_bytes(include_bytes!("../../../data/vi_bigrams.bin"), vi.len());
         let en_pairs = Bigrams::from_bytes(include_bytes!("../../../data/en_bigrams.bin"), en.len());
+        let vi_triples = Trigrams::from_bytes(include_bytes!("../../../data/vi_trigrams.bin"), vi.len());
+        let en_triples = Trigrams::from_bytes(include_bytes!("../../../data/en_trigrams.bin"), en.len());
         assert!(!vi_pairs.is_empty() && !en_pairs.is_empty(), "word pairs do not match the lexicons: rebuild with ac-data");
         SmartCorrector::new(vi, en)
             .with_bigrams(vi_pairs, en_pairs)
+            .with_trigrams(vi_triples, en_triples)
             .with_misspellings(include_str!("../../../data/en_misspellings.tsv"))
     }
 
@@ -678,6 +725,34 @@ mod tests {
         assert!(in_phrase > alone && in_phrase < 0.0, "{in_phrase}");
         // Without earlier words it is the previous word alone, as before.
         assert_eq!(c.correct_in("launh", &["pioneering"]), c.correct_after("launh", Some("pioneering")));
+    }
+
+    /// "đi ban" and friends: what the words before make of a bare syllable.
+    /// `cargo test -p ac-core ambiguous -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn ambiguous_bare_words() {
+        let c = corrector();
+        for history in [
+            vec!["đi"],
+            vec!["mình", "đi"],
+            vec!["cho", "mình", "đi"],
+            vec!["cái", "này", "cho", "mình", "đi"],
+            vec!["đi", "mua"],
+            vec!["tôi", "mua"],
+        ] {
+            let ctx = c.context_of(&history);
+            let mut scored: Vec<(String, f64)> = c.bare_index["ban"]
+                .iter()
+                .map(|&id| {
+                    let (w, f) = &c.vi.words()[id as usize];
+                    (w.clone(), c.with_context(*f, c.ngram_vi(ctx, id)))
+                })
+                .collect();
+            scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let top: Vec<_> = scored.iter().take(4).map(|(w, s)| format!("{w} {s:.1}")).collect();
+            println!("{:<28} -> {:<8} {top:?}", history.join(" "), format!("{:?}", c.correct_in("ban", &history)));
+        }
     }
 
     /// Prints decisions for a word list: `cargo test -p ac-core explore -- --ignored --nocapture`
