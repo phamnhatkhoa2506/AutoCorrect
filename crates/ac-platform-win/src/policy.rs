@@ -47,6 +47,8 @@ const AUTOCOMPLETE: &[&str] = &[
     "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe",
     "coccoc.exe", "browser.exe", "searchhost.exe", "searchapp.exe", "searchui.exe",
     "startmenuexperiencehost.exe",
+    // The end-to-end test window (see crates/ac-e2e), to exercise the guard.
+    "ac-e2e.exe",
 ];
 
 /// Whether replacements in this program need the inline-completion guard.

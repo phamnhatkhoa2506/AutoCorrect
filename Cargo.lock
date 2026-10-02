@@ -28,6 +28,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac-e2e"
+version = "0.1.0"
+dependencies = [
+ "ac-platform-win",
+ "windows",
+]
+
+[[package]]
 name = "ac-platform-win"
 version = "0.1.0"
 dependencies = [

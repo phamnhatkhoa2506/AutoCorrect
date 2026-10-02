@@ -6,13 +6,7 @@
 // No console window unless --debug asks for one.
 #![windows_subsystem = "windows"]
 
-mod focus;
-mod hook;
-mod inject;
-mod log;
-mod policy;
-mod settings;
-mod tray;
+use ac_platform_win::{focus, hook, log, settings, tray};
 
 use std::sync::atomic::{AtomicU32, Ordering};
 

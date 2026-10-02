@@ -1,0 +1,1 @@
+cargo build --release  && ./target/release/autocorrect.exe --debug

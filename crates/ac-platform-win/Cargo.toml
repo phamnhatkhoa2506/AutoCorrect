@@ -3,6 +3,10 @@ name = "ac-platform-win"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "ac_platform_win"
+path = "src/lib.rs"
+
 [[bin]]
 name = "autocorrect"
 path = "src/main.rs"

@@ -107,6 +107,17 @@ Kết quả (1200 câu mỗi ngôn ngữ), trước và sau Phase 3:
 
 Menu khay có mục **Ghi nhật ký sửa lỗi** (mặc định tắt). Khi bật, mỗi lần app sửa một từ hoặc bạn hoàn tác, một dòng được ghi vào `%APPDATA%\AutoCorrect\journal.tsv` (`giây\tFIX|UNDO\tphím đã gõ\ttừ sửa\ttừ trước đó`). File chỉ nằm trên máy bạn, không bao giờ gửi đi; xóa tùy ý. Xem báo cáo: `cargo run -p ac-bench --release -- --journal`.
 
+## Test tự động có cửa sổ riêng (E2E)
+
+```powershell
+# Thoát AutoCorrect ở menu khay trước, rồi:
+cargo run -p ac-e2e --release
+```
+
+`ac-e2e` mở một cửa sổ nhỏ có ô nhập, cài đúng hook của app, gửi phím bấm thật (SendInput) vào **chỉ cửa sổ đó** rồi đọc nội dung để so sánh với kết quả mong đợi (khoảng 15 giây, đừng chạm bàn phím lúc đó). Mỗi phím được gửi chỉ khi cửa sổ test đang ở phía trước, nếu không nó dừng ngay. Nó từ chối chạy khi `autocorrect.exe` đang chạy.
+
+Các ca: sửa lỗi tiếng Anh, dấu câu, Telex, gõ nhanh 2 ms/phím, gõ không dấu, Ctrl+Z, Backspace thuần túy, và **gợi ý tự điền**: ô nhập tự điền tên thư mục như thanh địa chỉ trình duyệt để tái hiện lỗi `toôi`, chạy một lần có bật chống lỗi và một lần tắt để thấy lỗi.
+
 ## Giới hạn đã biết
 
 - Sửa khi gõ Space hoặc `, . ; : ! ?` (bàn phím US). Enter, Tab và các ký tự khác (`/`, `-`, ngoặc, nháy) chỉ reset bộ đệm.

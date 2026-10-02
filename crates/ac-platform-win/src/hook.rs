@@ -82,6 +82,11 @@ pub fn init(settings: Settings) {
     });
 }
 
+/// Forgets what is on screen (used between end-to-end scenarios).
+pub fn reset_engine() {
+    with_engine(|e| e.on_key(Key::Reset));
+}
+
 pub fn settings() -> Settings {
     STATE.with(|cell| cell.borrow().settings)
 }
@@ -119,6 +124,9 @@ pub fn set_app(kind: AppKind, name: &str) {
     }
 }
 
+/// # Safety
+/// Windows calls this as a low-level keyboard hook: `lparam` must point to a
+/// valid `KBDLLHOOKSTRUCT`.
 pub unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
@@ -132,6 +140,8 @@ pub unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: L
     CallNextHookEx(None, code, wparam, lparam)
 }
 
+/// # Safety
+/// Windows calls this as a low-level mouse hook, with the arguments it defines.
 pub unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32
         && matches!(wparam.0 as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN)
