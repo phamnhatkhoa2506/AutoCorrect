@@ -548,9 +548,10 @@ fn main() {
     println!("{tuning:?}");
 
     let started = Instant::now();
-    let sets: [(&str, Language, Vec<&str>); 2] = [
+    let sets: [(&str, Language, Vec<&str>); 3] = [
         ("Vietnamese", Language::Vietnamese, vec!["vie_news_2022_1M", "vie-vn_web_2015_1M"]),
         ("English", Language::English, vec!["eng_news_2023_1M"]),
+        ("Vietnamese dialogue (subtitles)", Language::Vietnamese, vec!["vie_subtitles"]),
     ];
     let mut alls: Vec<Vec<Word>> = sets
         .iter()
@@ -573,7 +574,7 @@ fn main() {
         let pools: Vec<Vec<String>> = alls.iter().map(|all| all.iter().map(|w| w.text.clone()).collect()).collect();
         let mut rng = Rng(seed.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1);
         for (i, all) in alls.iter_mut().enumerate() {
-            let other = &pools[1 - i];
+            let other = &pools[if sets[i].1 == Language::Vietnamese { 1 } else { 0 }];
             for word in all.iter_mut().filter(|w| w.prev.is_some()) {
                 if rng.chance(mixed) {
                     let foreign = other[(rng.next() as usize) % other.len()].clone();
@@ -600,7 +601,7 @@ fn main() {
                 Case { word, typed, bare: false }
             })
             .collect();
-        if name == "Vietnamese" && args.iter().any(|a| a == "--diagnose") {
+        if name.starts_with("Vietnamese") && args.iter().any(|a| a == "--diagnose") {
             corrector.set_context(true);
             diagnose(&corrector, &cases);
         }

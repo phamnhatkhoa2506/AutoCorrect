@@ -39,6 +39,11 @@ fn main() -> std::io::Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         return write_trigrams(&root, &root.join("data/raw"), min);
     }
+    if std::env::args().any(|a| a == "--bigrams") {
+        // Only the pair tables.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        return write_bigrams(&root, &root.join("data/raw"));
+    }
     let cc_by_only = std::env::args().any(|a| a == "--cc-by-only");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let raw = root.join("data/raw");
@@ -74,7 +79,7 @@ fn write_bigrams(root: &Path, raw: &Path) -> std::io::Result<()> {
     use bigrams::{Corpus, Language};
 
     let jobs = [
-        ("vi", Language::Vietnamese, vec![Corpus { dir: "vie_news_2022_1M" }, Corpus { dir: "vie-vn_web_2015_1M" }]),
+        ("vi", Language::Vietnamese, vec![Corpus { dir: "vie_news_2022_1M" }, Corpus { dir: "vie-vn_web_2015_1M" }, Corpus { dir: "vie_subtitles" }]),
         ("en", Language::English, vec![Corpus { dir: "eng_news_2023_1M" }]),
     ];
     for (code, language, corpora) in jobs {
@@ -95,7 +100,7 @@ fn write_trigrams(root: &Path, raw: &Path, min_count: u32) -> std::io::Result<()
     use bigrams::{Corpus, Language};
 
     let jobs = [
-        ("vi", Language::Vietnamese, vec![Corpus { dir: "vie_news_2022_1M" }, Corpus { dir: "vie-vn_web_2015_1M" }]),
+        ("vi", Language::Vietnamese, vec![Corpus { dir: "vie_news_2022_1M" }, Corpus { dir: "vie-vn_web_2015_1M" }, Corpus { dir: "vie_subtitles" }]),
         ("en", Language::English, vec![Corpus { dir: "eng_news_2023_1M" }]),
     ];
     for (code, language, corpora) in jobs {

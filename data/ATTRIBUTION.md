@@ -7,3 +7,6 @@
 - **FrequencyWords** by Hermit Dave: `vi_50k.txt`, `en_50k.txt` (OpenSubtitles 2018). https://github.com/hermitdave/FrequencyWords (CC BY-SA 4.0)
 
 Raw downloads live in `data/raw/` (not committed).
+
+Vietnamese dialogue (word-pair and word-triple tables only; the text itself is not shipped):
+OpenSubtitles2018 via OPUS, P. Lison and J. Tiedemann, 2016, "OpenSubtitles2016: Extracting Large Parallel Corpora from Movie and TV Subtitles" (LREC). https://opus.nlpl.eu/OpenSubtitles.php
