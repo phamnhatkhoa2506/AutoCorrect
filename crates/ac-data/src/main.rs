@@ -9,6 +9,7 @@
 //! `--cc-by-only` skips FrequencyWords so the output carries no share-alike terms.
 
 mod bigrams;
+mod kn_build;
 mod trigrams;
 
 use std::collections::HashMap;
@@ -33,6 +34,11 @@ struct Source {
 }
 
 fn main() -> std::io::Result<()> {
+    if std::env::args().any(|a| a == "--kn") {
+        // Only the Kneser-Ney tables.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        return write_kn(&root, &root.join("data/raw"));
+    }
     if let Some(at) = std::env::args().position(|a| a == "--trigrams") {
         // Only the triple tables: `--trigrams [min count]`.
         let min = std::env::args().nth(at + 1).and_then(|v| v.parse().ok()).unwrap_or(3);
@@ -88,6 +94,30 @@ fn write_bigrams(root: &Path, raw: &Path) -> std::io::Result<()> {
         eprintln!("{code}: counting word pairs...");
         let table = bigrams::build(raw, &corpora, language, &lexicon)?;
         let out = root.join(format!("data/{code}_bigrams.bin"));
+        fs::write(&out, &table)?;
+        eprintln!("wrote {} ({:.1} MB)", out.display(), table.len() as f64 / 1e6);
+    }
+    Ok(())
+}
+
+/// Kneser-Ney tables for the corpora that are present in `data/raw`.
+fn write_kn(root: &Path, raw: &Path) -> std::io::Result<()> {
+    use ac_core::Lexicon;
+    use bigrams::{Corpus, Language};
+
+    let jobs = [
+        ("vi", Language::Vietnamese, vec![Corpus { dir: "vie_news_2022_1M" }, Corpus { dir: "vie-vn_web_2015_1M" }, Corpus { dir: "vie_subtitles" }]),
+        ("en", Language::English, vec![Corpus { dir: "eng_news_2023_1M" }]),
+    ];
+    for (code, language, corpora) in jobs {
+        let tsv = root.join(match code {
+            "vi" => "data/vi_syllables.tsv",
+            _ => "data/en_words.tsv",
+        });
+        let lexicon = Lexicon::parse(&fs::read_to_string(tsv)?);
+        eprintln!("{code}: Kneser-Ney...");
+        let table = kn_build::build(raw, &corpora, language, &lexicon)?;
+        let out = root.join(format!("data/{code}_kn.bin"));
         fs::write(&out, &table)?;
         eprintln!("wrote {} ({:.1} MB)", out.display(), table.len() as f64 / 1e6);
     }

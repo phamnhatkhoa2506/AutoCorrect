@@ -635,6 +635,7 @@ fn main() {
         far_ambiguity: flag("--far-ambiguity", d.far_ambiguity),
         bigram_weight: flag("--weight", d.bigram_weight),
         trigram_weight: flag("--tri", d.trigram_weight),
+        kn: flag("--kn", f64::from(u8::from(d.kn))) > 0.0,
         language_penalty: flag("--language", d.language_penalty),
         phrase_decay: flag("--phrase", d.phrase_decay),
         restore_margin: flag("--restore-margin", d.restore_margin),
@@ -658,9 +659,16 @@ fn main() {
     };
     let (vi_tri, en_tri) = (triples(vi_lex.len(), "data/vi_trigrams.bin"), triples(en_lex.len(), "data/en_trigrams.bin"));
     println!("trigrams: vi {} triples, en {} triples", vi_tri.len(), en_tri.len());
+    let kn_table = |vocab: usize, bin: &str| {
+        let bytes: &'static [u8] = Box::leak(fs::read(root.join(bin)).unwrap_or_default().into_boxed_slice());
+        ac_core::Kn::from_bytes(bytes, vocab)
+    };
+    let (vi_kn, en_kn) = (kn_table(vi_lex.len(), "data/vi_kn.bin"), kn_table(en_lex.len(), "data/en_kn.bin"));
+    println!("kneser-ney: vi {} pairs {} triples, en {} pairs {} triples", vi_kn.pairs(), vi_kn.triples(), en_kn.pairs(), en_kn.triples());
     let mut corrector = SmartCorrector::new(vi_lex, en_lex)
         .with_bigrams(vi_bi, en_bi)
         .with_trigrams(vi_tri, en_tri)
+        .with_kn(vi_kn, en_kn)
         .with_misspellings(&misspellings);
     corrector.set_tuning(tuning);
     if let Some(i) = args.iter().position(|a| a == "--golden") {

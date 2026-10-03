@@ -14,6 +14,7 @@ use ac_telex::syllable::split_tone;
 use ac_telex::{compose, to_keys, Kind, Tone};
 
 use crate::bigrams::Bigrams;
+use crate::kn::Kn;
 use crate::trigrams::Trigrams;
 use crate::corrector::{match_case, Corrector};
 use crate::edits::{bag_distance, edits1, letter_counts, slip_cost, FAR_MAX_COST};
@@ -66,6 +67,9 @@ pub struct Tuning {
     /// triple was seen: the rest is the pair-and-frequency estimate. 0 means
     /// pairs only.
     pub trigram_weight: f64,
+    /// Use the Kneser-Ney tables instead of mixing pairs and triples with
+    /// fixed weights (when the tables are loaded).
+    pub kn: bool,
     /// Penalty for a candidate of the other language than the previous word
     /// (an English word after an English word is more likely English).
     pub language_penalty: f64,
@@ -97,9 +101,10 @@ impl Default for Tuning {
             far_ambiguity: 1.0,
             bigram_weight: 0.5,
             trigram_weight: 0.7,
+            kn: true,
             language_penalty: 3.0,
             phrase_decay: 0.7,
-            restore_margin: 5.0,
+            restore_margin: 6.5,
             restore_ambiguity: 1.5,
             restore_english: 8.0,
         }
@@ -118,7 +123,7 @@ impl Tuning {
                 margin: 3.0,
                 floor: 6.5,
                 far_floor: 7.5,
-                restore_margin: 6.5,
+                restore_margin: 8.0,
                 ..balanced
             },
             2 => Self {
@@ -127,7 +132,7 @@ impl Tuning {
                 margin: 1.0,
                 floor: 4.5,
                 far_floor: 5.0,
-                restore_margin: 3.5,
+                restore_margin: 5.0,
                 ..balanced
             },
             _ => balanced,
@@ -142,6 +147,8 @@ pub struct SmartCorrector {
     en_bigrams: Bigrams,
     vi_trigrams: Trigrams,
     en_trigrams: Trigrams,
+    vi_kn: Kn,
+    en_kn: Kn,
     /// Telex keys of every Vietnamese syllable, by lexicon id (for the
     /// two-slip search).
     vi_keys: Vec<String>,
@@ -179,6 +186,8 @@ pub struct Ranking {
 struct Ngram {
     bi: Option<f64>,
     tri: Option<f64>,
+    /// ln P from the Kneser-Ney tables, when in use.
+    kn: Option<f64>,
 }
 
 /// The previous word, as ids in each lexicon.
@@ -208,6 +217,8 @@ impl SmartCorrector {
             en_bigrams: Bigrams::EMPTY,
             vi_trigrams: Trigrams::EMPTY,
             en_trigrams: Trigrams::EMPTY,
+            vi_kn: Kn::EMPTY,
+            en_kn: Kn::EMPTY,
             vi_keys,
             vietnamese: true,
             english: true,
@@ -248,6 +259,12 @@ impl SmartCorrector {
     }
 
     /// Adds word-pair statistics (see [`Bigrams::from_bytes`]).
+    pub fn with_kn(mut self, vi: Kn, en: Kn) -> Self {
+        self.vi_kn = vi;
+        self.en_kn = en;
+        self
+    }
+
     pub fn with_trigrams(mut self, vi: Trigrams, en: Trigrams) -> Self {
         self.vi_trigrams = vi;
         self.en_trigrams = en;
@@ -293,6 +310,9 @@ impl SmartCorrector {
 
     /// ln frequency, raised when the previous word makes it likely.
     fn with_context(&self, f: f64, ngram: Ngram) -> f64 {
+        if let Some(ln_p) = ngram.kn {
+            return ln_p + LN_BILLION;
+        }
         if ngram.bi.is_none() && ngram.tri.is_none() {
             return f;
         }
@@ -305,14 +325,18 @@ impl SmartCorrector {
     }
 
     fn ngram_vi(&self, ctx: Context, id: u32) -> Ngram {
+        let kn = ctx.vi.filter(|_| self.tuning.kn && !self.vi_kn.is_empty()).map(|b| self.vi_kn.ln_prob(ctx.vi2, b, id));
         Ngram {
+            kn,
             bi: ctx.vi.and_then(|p| self.vi_bigrams.ln_prob(p, id)),
             tri: ctx.vi2.zip(ctx.vi).and_then(|(a, b)| self.vi_trigrams.ln_prob(a, b, id)),
         }
     }
 
     fn ngram_en(&self, ctx: Context, id: u32) -> Ngram {
+        let kn = ctx.en.filter(|_| self.tuning.kn && !self.en_kn.is_empty()).map(|b| self.en_kn.ln_prob(ctx.en2, b, id));
         Ngram {
+            kn,
             bi: ctx.en.and_then(|p| self.en_bigrams.ln_prob(p, id)),
             tri: ctx.en2.zip(ctx.en).and_then(|(a, b)| self.en_trigrams.ln_prob(a, b, id)),
         }
@@ -688,10 +712,13 @@ mod tests {
         let en_pairs = Bigrams::from_bytes(include_bytes!("../../../data/en_bigrams.bin"), en.len());
         let vi_triples = Trigrams::from_bytes(include_bytes!("../../../data/vi_trigrams.bin"), vi.len());
         let en_triples = Trigrams::from_bytes(include_bytes!("../../../data/en_trigrams.bin"), en.len());
+        let vi_kn = Kn::from_bytes(include_bytes!("../../../data/vi_kn.bin"), vi.len());
+        let en_kn = Kn::from_bytes(include_bytes!("../../../data/en_kn.bin"), en.len());
         assert!(!vi_pairs.is_empty() && !en_pairs.is_empty(), "word pairs do not match the lexicons: rebuild with ac-data");
         SmartCorrector::new(vi, en)
             .with_bigrams(vi_pairs, en_pairs)
             .with_trigrams(vi_triples, en_triples)
+            .with_kn(vi_kn, en_kn)
             .with_misspellings(include_str!("../../../data/en_misspellings.tsv"))
     }
 
@@ -751,7 +778,8 @@ mod tests {
     fn context_prefers_the_sentence_language() {
         let c = corrector();
         assert!(c.correct_after("launh", None).is_some_and(|fix| !fix.is_ascii() || fix == "anh"));
-        assert_eq!(c.correct_after("launh", Some("pioneering")), None);
+        // An English slip after an English word is an English word: launch, never anh.
+        assert_eq!(c.correct_after("launh", Some("pioneering")).as_deref(), Some("launch"));
         assert_ne!(c.correct_after("ays", Some("three")).as_deref(), Some("ấy"));
     }
 

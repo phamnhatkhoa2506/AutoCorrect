@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
-use ac_core::{Action, Bigrams, Decision, Engine, Key, Lexicon, Personal, SmartCorrector, Trigrams};
+use ac_core::{Action, Decision, Engine, Key, Kn, Lexicon, Personal, SmartCorrector};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -136,13 +136,10 @@ fn corrector() -> SmartCorrector {
     let vi = Lexicon::parse(include_str!("../../../data/vi_syllables.tsv"));
     let en = Lexicon::parse(include_str!("../../../data/en_words.tsv"));
     // Word pairs are built for exactly these lexicons (empty if they differ).
-    let vi_pairs = Bigrams::from_bytes(include_bytes!("../../../data/vi_bigrams.bin"), vi.len());
-    let en_pairs = Bigrams::from_bytes(include_bytes!("../../../data/en_bigrams.bin"), en.len());
-    let vi_triples = Trigrams::from_bytes(include_bytes!("../../../data/vi_trigrams.bin"), vi.len());
-    let en_triples = Trigrams::from_bytes(include_bytes!("../../../data/en_trigrams.bin"), en.len());
+    let vi_kn = Kn::from_bytes(include_bytes!("../../../data/vi_kn.bin"), vi.len());
+    let en_kn = Kn::from_bytes(include_bytes!("../../../data/en_kn.bin"), en.len());
     SmartCorrector::new(vi, en)
-        .with_bigrams(vi_pairs, en_pairs)
-        .with_trigrams(vi_triples, en_triples)
+        .with_kn(vi_kn, en_kn)
         .with_misspellings(include_str!("../../../data/en_misspellings.tsv"))
 }
 
