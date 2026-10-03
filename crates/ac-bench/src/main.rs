@@ -5,6 +5,7 @@
 //!         [--far-floor F --far-ambiguity A --no-list]
 //!         [--bare R --restore-margin M --restore-ambiguity A --restore-english E]
 //!     cargo run -p ac-bench --release -- --golden [file]    (real and reported cases, bench/golden.tsv)
+//!     cargo run -p ac-bench --release -- --from-journal [journal] [out]   (journal -> bench/journal_cases.tsv)
 //!     cargo run -p ac-bench --release -- --journal [file]   (report on your own journal)
 //!
 //! Every word of real sentences (never seen in training: the last
@@ -557,11 +558,61 @@ fn golden(corrector: &mut SmartCorrector, path: &Path) -> bool {
     total[0] == total[1]
 }
 
+/// Turns the journal into golden cases (`--from-journal [journal] [out]`):
+/// a correction you kept is a case that must keep working; one you undid is
+/// a case expected to be left alone (a goal until the model stops making it).
+/// Lines from before the mode column existed are guessed from the fix.
+fn journal_cases(journal: &Path, out: &Path) {
+    use std::collections::BTreeSet;
+    let text = fs::read_to_string(journal).unwrap_or_default();
+    // (keys, fix, context, mode, app)
+    type Entry = (String, String, String, String, String);
+    let mut entries: Vec<(bool, Entry)> = Vec::new(); // (undone, entry)
+    let mut undone_pairs: BTreeSet<(String, String)> = BTreeSet::new();
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let [_, kind, keys, fix, rest @ ..] = &f[..] else { continue };
+        let (kind, keys, fix) = (*kind, *keys, *fix);
+        let context = rest.first().copied().unwrap_or("").to_string();
+        let mode = rest.get(1).copied().filter(|m| !m.is_empty()).map_or_else(|| if fix.is_ascii() { "en" } else { "vi" }, |m| m).to_string();
+        let app = rest.get(2).copied().unwrap_or("Normal").to_string();
+        if kind == "UNDO" {
+            undone_pairs.insert((keys.to_string(), fix.to_string()));
+        }
+        if kind == "FIX" || kind == "UNDO" {
+            entries.push((kind == "UNDO", (keys.to_string(), fix.to_string(), context, mode, app)));
+        }
+    }
+    let mut seen: BTreeSet<Entry> = BTreeSet::new();
+    let mut rows = vec!["id\tgroup\tmode\tcontext\ttyped\texpected\tlevel\tsource\tnote".to_string()];
+    for (_, entry) in &entries {
+        if !seen.insert(entry.clone()) {
+            continue;
+        }
+        let (keys, fix, context, mode, app) = entry;
+        let rejected = undone_pairs.contains(&(keys.clone(), fix.clone()));
+        let mode = if app == "Code" && mode == "vi" { "code" } else { mode.as_str() };
+        let (group, expected, level) = if rejected { ("journal-undone", "=", "goal") } else { ("journal-kept", fix.as_str(), "must") };
+        rows.push(format!("j{:03}\t{group}\t{mode}\t{context}\t{keys}\t{expected}\t{level}\tjournal\t{app}", rows.len()));
+    }
+    fs::write(out, rows.join("
+") + "
+").expect("write cases");
+    println!("{} cases from {} journal lines -> {}", rows.len() - 1, entries.len(), out.display());
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--journal") {
         let default = std::env::var("APPDATA").map(|d| PathBuf::from(d).join("AutoCorrect").join("journal.tsv")).unwrap_or_default();
         journal_report(&args.get(i + 1).map(PathBuf::from).unwrap_or(default));
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--from-journal") {
+        let appdata = std::env::var("APPDATA").map(|d| PathBuf::from(d).join("AutoCorrect")).unwrap_or_default();
+        let journal = args.get(i + 1).filter(|a| !a.starts_with("--")).map(PathBuf::from).unwrap_or(appdata.join("journal.tsv"));
+        let out = args.get(i + 2).filter(|a| !a.starts_with("--")).map(PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench/journal_cases.tsv"));
+        journal_cases(&journal, &out);
         return;
     }
     let flag = |name: &str, default: f64| {

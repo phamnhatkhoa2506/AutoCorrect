@@ -342,7 +342,8 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
                 _ => None,
             };
             if let Some((kind, keys, fix)) = entry {
-                log::journal(format!("{kind}\t{keys}\t{fix}\t{}", context.as_deref().unwrap_or("")));
+                let mode = if state.engine.is_vietnamese() { "vi" } else { "en" };
+                log::journal(format!("{kind}\t{keys}\t{fix}\t{}\t{mode}\t{:?}", context.as_deref().unwrap_or(""), state.app));
             }
         }
         if matches!(key, Key::Space | Key::Punct(_)) && log::debug_enabled() {
