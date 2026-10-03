@@ -160,6 +160,10 @@ pub fn check(chars: &[char], tone: Option<Tone>, mode: Mode) -> Option<Parts> {
         if matches!(coda.as_str(), "ch" | "nh") && !CH_NH_NUCLEI.contains(&nuc_str.as_str()) {
             return None;
         }
+        // After a lone i or ê the stop is "ch", never "c" (ích, ếch; not "íc").
+        if coda == "c" && matches!(nuc_str.as_str(), "i" | "ê") {
+            return None;
+        }
     }
 
     // Stop codas only take sắc or nặng (and need one once the word is done).
@@ -273,7 +277,7 @@ mod tests {
         for w in [
             "được", "tiếng", "việt", "nguyễn", "hòa", "hoà", "thủy", "thuỷ", "mưa", "gì", "giữ",
             "quốc", "của", "không", "khuya", "thuở", "người", "nghiêng", "ếch", "quyền", "yêu",
-            "Đi", "ăn", "ấy", "khuếch", "xoong", "các", "học", "gìn", "ịch",
+            "Đi", "ăn", "ấy", "khuếch", "xoong", "các", "học", "gìn", "ịch", "thích", "tiếc",
         ] {
             assert!(is_valid_word(w), "{w} should be valid");
         }
@@ -283,7 +287,7 @@ mod tests {
     fn invalid_words() {
         for w in [
             "dunhf", "teh", "hello", "ka", "ge", "nge", "cac", "càc", "ă", "tiê", "aiu", "anhh",
-            "tyên", "fan", "wa", "ácc", "áá",
+            "tyên", "fan", "wa", "ácc", "áá", "thíc", "ếc",
         ] {
             assert!(!is_valid_word(w), "{w} should be invalid");
         }

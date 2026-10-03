@@ -783,6 +783,16 @@ mod tests {
         assert_ne!(c.correct_after("ays", Some("three")).as_deref(), Some("ấy"));
     }
 
+    /// A letter missing from a Vietnamese word ("thics" for "thích"): invalid as
+    /// typed ("thíc" is not a syllable), so the fix may add the letter. With
+    /// Vietnamese words before it, the Vietnamese reading wins over "this".
+    #[test]
+    fn restores_a_missing_letter_in_vietnamese_context() {
+        let c = corrector();
+        assert_eq!(c.correct_in("thics", &["tôi"]).as_deref(), Some("thích"));
+        assert_eq!(c.correct_in("thics", &["tôi", "rất"]).as_deref(), Some("thích"));
+    }
+
     /// An English word in the middle of Vietnamese text does not turn the
     /// phrase English: the words before it still count, less each step back.
     #[test]
@@ -832,7 +842,7 @@ mod tests {
         for w in [
             "teh", "recieve", "dunhf", "mooir", "gruwi", "toi", "khoi", "lops", "ws", "npm", "kubectl",
             "cargo", "Tuan", "nhanh", "nhnah", "vieejt", "ddungs", "thuowng", "hte", "adn", "waht",
-            "becuase", "definately", "occured", "thier", "jsut", "taht", "wiht", "khogn", "duowcj",
+            "becuase", "definately", "occured", "thier", "jsut", "taht", "wiht", "khogn", "duowcj", "thics", "thichs", "thihc", "thix",
         ] {
             let r = c.rank(w, None);
             let top: Vec<_> = r.iter().flat_map(|r| r.candidates.iter().take(3)).collect();
