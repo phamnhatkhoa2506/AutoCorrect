@@ -127,10 +127,14 @@ pub fn journal(line: String) {
     }
 }
 
-/// `unix_seconds<TAB>FIX|UNDO<TAB>keys<TAB>fix<TAB>previous word`.
+/// `unix_seconds<TAB>FIX|UNDO|EDIT|NEAR<TAB>...` (see `bench/README.md`).
+/// Stops growing at 8 MB: the file holds what was typed.
 fn append_journal(line: &str) {
     use std::io::Write;
     let Some(path) = crate::settings::journal_path() else { return };
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 8_000_000) {
+        return;
+    }
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }

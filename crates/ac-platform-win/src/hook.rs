@@ -325,8 +325,30 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let keys = state.engine.current_keys().to_string();
         let context = state.engine.context().map(str::to_string);
         let pending = state.engine.last_correction().map(|(k, f)| (k.to_string(), f.to_string()));
+        let history = state.engine.history();
         let action = state.engine.on_key(key);
         let guard = state.guard && state.settings.autocomplete_guard;
+        // Hand-made fixes and hard cases, for learning: opt-in, never in
+        // terminals/IDEs (hands-off apps and passwords never get this far).
+        let edit = state.engine.take_manual_edit();
+        if state.app == AppKind::Normal {
+            let mode = if state.engine.is_vietnamese() { "vi" } else { "en" };
+            if let (true, Some((from, to))) = (state.settings.journal_edits, edit) {
+                log::journal(format!("EDIT\t{from}\t{to}\t{}\t{mode}\t{:?}", history.join(" "), state.app));
+            }
+            let telex = state.settings.input == ac_config::InputMethod::Telex;
+            if state.settings.journal_hard
+                && telex
+                && matches!(key, Key::Space | Key::Punct(_))
+                && state.engine.last_decision() == Decision::NoCandidate
+                && !keys.is_empty()
+            {
+                let words: Vec<&str> = history.iter().map(String::as_str).collect();
+                if let Some(note) = state.engine.corrector_mut().near_miss(&keys, &words) {
+                    log::journal(format!("NEAR\t{keys}\t{note}\t{}\t{mode}\t{:?}", history.join(" "), state.app));
+                }
+            }
+        }
         if let Some(word) = state.engine.take_learned() {
             // Undone twice: remember for good, and ignore from now on.
             state.engine.corrector_mut().add_ignore(&word);

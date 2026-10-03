@@ -515,6 +515,49 @@ impl SmartCorrector {
         self.rank_in(word, prev.as_slice())
     }
 
+    /// For the hard-case journal: a word left alone although it had a close
+    /// alternative. Returns a short note ("best score | next score | typed
+    /// score"), or `None` when the word is plainly fine or has no plausible
+    /// alternative.
+    pub fn near_miss(&self, word: &str, history: &[&str]) -> Option<String> {
+        let keys = Self::keys_of(word)?;
+        if self.personal.ignores(&word.to_lowercase()) {
+            return None;
+        }
+        let capital = word.chars().next().is_some_and(char::is_uppercase);
+        let bare = self.vietnamese && self.restore && !capital && compose(&keys).text == keys;
+        let ranking = if bare {
+            // Common English words that are also bare syllables are left alone on purpose.
+            if self.en.log_freq(&keys).is_some_and(|f| f >= self.tuning.restore_english) {
+                return None;
+            }
+            self.rank_bare(&keys, history)?
+        } else {
+            let (typed, vietnamese) = self.typed(&keys);
+            let known = if vietnamese.is_some() { self.tuning.known_syllable } else { self.tuning.known_word };
+            if typed >= known {
+                return None;
+            }
+            self.rank_in(word, history)?
+        };
+        let top = ranking.candidates.first()?;
+        let second = ranking.candidates.get(1);
+        let gap = second.map_or(f64::INFINITY, |c| top.1 - c.1);
+        // Plainly fine as typed, or a clear winner over everything: not a hard case.
+        if ranking.typed - top.1 > 3.0 || (gap >= 2.0 && top.1 - ranking.typed >= 3.0) {
+            return None;
+        }
+        let show = |s: f64| if s.is_finite() { format!("{s:.1}") } else { "-".to_string() };
+        Some(format!(
+            "{} {} | {} {} | typed {}",
+            top.0,
+            show(top.1),
+            second.map_or("-", |c| c.0.as_str()),
+            show(second.map_or(f64::NEG_INFINITY, |c| c.1)),
+            show(ranking.typed)
+        ))
+    }
+
     /// Diagnostics for a word typed without marks: the score of the bare word
     /// and of its accented readings, best first (what `restore_marks` weighs).
     pub fn rank_bare(&self, keys: &str, history: &[&str]) -> Option<Ranking> {
@@ -781,6 +824,17 @@ mod tests {
         // An English slip after an English word is an English word: launch, never anh.
         assert_eq!(c.correct_after("launh", Some("pioneering")).as_deref(), Some("launch"));
         assert_ne!(c.correct_after("ays", Some("three")).as_deref(), Some("ấy"));
+    }
+
+    /// The hard-case journal: a word left alone with two close readings is
+    /// reported; a plainly fine word is not.
+    #[test]
+    fn near_miss_reports_close_calls_only() {
+        let c = corrector();
+        let note = c.near_miss("chuww", &["thích", "tớ"]).expect("close call");
+        assert!(note.contains("chứ") || note.contains("chưa"), "{note}");
+        assert_eq!(c.near_miss("hello", &[]), None);
+        assert_eq!(c.near_miss("the", &["is"]), None);
     }
 
     /// A letter missing from a Vietnamese word ("thics" for "thích"): invalid as

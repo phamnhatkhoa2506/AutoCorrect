@@ -15,6 +15,8 @@ use std::process::Command;
 struct Options {
     corrections: bool,
     journal: bool,
+    journal_edits: bool,
+    journal_hard: bool,
     code_english: bool,
     autocomplete_guard: bool,
     restore_marks: bool,
@@ -67,6 +69,8 @@ fn options_of(s: &Settings) -> Options {
     Options {
         corrections: s.corrections,
         journal: s.journal,
+        journal_edits: s.journal_edits,
+        journal_hard: s.journal_hard,
         code_english: s.code_english,
         autocomplete_guard: s.autocomplete_guard,
         restore_marks: s.restore_marks,
@@ -161,6 +165,8 @@ fn save_options(options: Options) -> Result<(), String> {
     let mut s = settings::load();
     s.corrections = options.corrections;
     s.journal = options.journal;
+    s.journal_edits = options.journal_edits;
+    s.journal_hard = options.journal_hard;
     s.code_english = options.code_english;
     s.autocomplete_guard = options.autocomplete_guard;
     s.restore_marks = options.restore_marks;

@@ -40,3 +40,17 @@ Không chứa dữ liệu của người dùng. Trường chính:
 | `truth_in` | đáp án có nằm trong danh sách ứng viên hay không |
 
 `--sentences N` chọn số câu mỗi tập; số mẫu khoảng 40 lần số câu cho tiếng Việt.
+
+## Nhật ký học (`journal.tsv`)
+
+Mỗi dòng: `giây_unix<Tab>loại<Tab>...`. Có bốn loại; hai loại sau mặc định **tắt**, bật riêng trong tray hoặc cửa sổ cài đặt.
+
+| Loại | Các cột sau | Khi nào ghi |
+|---|---|---|
+| `FIX` | phím gõ, chữ sửa thành, từ trước, chế độ, nhóm app | App tự sửa một từ |
+| `UNDO` | như `FIX` | Bạn hoàn tác (Ctrl+Z) lần sửa đó |
+| `EDIT` | chữ trước khi sửa, chữ sau khi sửa, 3 từ trước, chế độ, nhóm app | Bạn xóa lùi vào một từ rồi sửa tay (chỉ khi sửa nhỏ, tối đa 3 ký tự) |
+| `NEAR` | phím gõ, ghi chú điểm (ứng viên tốt nhất, ứng viên kế, điểm chữ đã gõ), 3 từ trước, chế độ, nhóm app | App bỏ qua một từ nhưng có ứng viên gần nhau |
+
+`EDIT` và `NEAR` không ghi trong terminal/IDE và ô mật khẩu; `NEAR` chỉ ghi khi gõ Telex. File dừng tăng ở 8 MB.
+`ac-bench --from-journal` biến `FIX`/`UNDO`/`EDIT` thành ca kiểm thử (`EDIT` thành ca mục tiêu có đáp án là chữ bạn sửa).

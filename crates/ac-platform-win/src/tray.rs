@@ -46,6 +46,8 @@ const ID_RESTORE: usize = 8;
 const ID_PERSONAL: usize = 10;
 const ID_EXIT: usize = 9;
 const ID_SETTINGS: usize = 11;
+const ID_EDITS: usize = 12;
+const ID_HARD: usize = 13;
 
 thread_local! {
     static WINDOW: Cell<HWND> = Cell::new(HWND::default());
@@ -150,6 +152,8 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             ID_CORRECTIONS => hook::update(|s| s.corrections = !s.corrections),
             ID_PAUSED => hook::update(|s| s.paused = !s.paused),
             ID_JOURNAL => hook::update(|s| s.journal = !s.journal),
+            ID_EDITS => hook::update(|s| s.journal_edits = !s.journal_edits),
+            ID_HARD => hook::update(|s| s.journal_hard = !s.journal_hard),
             ID_CODE_ENGLISH => hook::update(|s| s.code_english = !s.code_english),
             ID_GUARD => hook::update(|s| s.autocomplete_guard = !s.autocomplete_guard),
             ID_RESTORE => hook::update(|s| s.restore_marks = !s.restore_marks),
@@ -172,7 +176,7 @@ unsafe fn show_menu(hwnd: HWND) {
     let Ok(menu) = CreatePopupMenu() else { return };
     let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
     let vietnamese = HSTRING::from(format!("Tiếng Việt (Telex)\t{}", s.hotkey));
-    let items: [(usize, PCWSTR, bool); 8] = [
+    let items: [(usize, PCWSTR, bool); 10] = [
         (ID_VIETNAMESE, PCWSTR(vietnamese.as_ptr()), s.vietnamese),
         (ID_CORRECTIONS, w!("Tự sửa lỗi gõ"), s.corrections),
         (ID_PAUSED, w!("Tạm dừng"), s.paused),
@@ -181,6 +185,8 @@ unsafe fn show_menu(hwnd: HWND) {
         (ID_RESTORE, w!("Tự thêm dấu khi gõ không dấu (khong → không)"), s.restore_marks),
         (ID_GUARD, w!("Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm"), s.autocomplete_guard),
         (ID_JOURNAL, w!("Ghi nhật ký sửa lỗi (để tinh chỉnh)"), s.journal),
+        (ID_EDITS, w!("Ghi chữ bạn tự sửa tay (để học)"), s.journal_edits),
+        (ID_HARD, w!("Ghi ca khó app bỏ qua (để học)"), s.journal_hard),
     ];
     for (id, label, on) in items {
         let _ = AppendMenuW(menu, MF_STRING | check(on), id, label);

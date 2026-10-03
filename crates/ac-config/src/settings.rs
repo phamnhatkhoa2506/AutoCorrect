@@ -77,6 +77,10 @@ pub struct Settings {
     pub paused: bool,
     /// Append every correction and undo to the local journal file.
     pub journal: bool,
+    /// Also journal words you went back into and fixed by hand (before, after).
+    pub journal_edits: bool,
+    /// Also journal hard cases the app left alone (close candidates).
+    pub journal_hard: bool,
     /// Correct English in terminals and IDEs too (off: only Vietnamese there,
     /// so commands and code are left alone).
     pub code_english: bool,
@@ -97,6 +101,8 @@ impl Default for Settings {
             corrections: true,
             paused: false,
             journal: false,
+            journal_edits: false,
+            journal_hard: false,
             code_english: false,
             autocomplete_guard: true,
             restore_marks: true,
@@ -119,6 +125,8 @@ impl Settings {
                 "corrections" => s.corrections = on,
                 "paused" => s.paused = on,
                 "journal" => s.journal = on,
+                "journal_edits" => s.journal_edits = on,
+                "journal_hard" => s.journal_hard = on,
                 "code_english" => s.code_english = on,
                 "autocomplete_guard" => s.autocomplete_guard = on,
                 "restore_marks" => s.restore_marks = on,
@@ -134,11 +142,13 @@ impl Settings {
     pub fn to_ini(&self) -> String {
         let flag = |b: bool| u8::from(b);
         format!(
-            "vietnamese={}\ncorrections={}\npaused={}\njournal={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\nhotkey={}\nstrength={}\ninput={}\n",
+            "vietnamese={}\ncorrections={}\npaused={}\njournal={}\njournal_edits={}\njournal_hard={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\nhotkey={}\nstrength={}\ninput={}\n",
             flag(self.vietnamese),
             flag(self.corrections),
             flag(self.paused),
             flag(self.journal),
+            flag(self.journal_edits),
+            flag(self.journal_hard),
             flag(self.code_english),
             flag(self.autocomplete_guard),
             flag(self.restore_marks),
@@ -174,6 +184,8 @@ mod tests {
             vietnamese: false,
             paused: true,
             journal: true,
+            journal_edits: true,
+            journal_hard: true,
             hotkey: Hotkey::parse("Ctrl+Shift").unwrap(),
             strength: Strength::Bold,
             ..Settings::default()

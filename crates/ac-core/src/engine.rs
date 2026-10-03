@@ -62,6 +62,22 @@ struct LastCorrection {
     delimiter_removed: bool,
 }
 
+/// Number of single-character edits between two words.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (above + 1).min(row[j] + 1).min(diagonal + usize::from(ca != cb));
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
 /// How many words before the previous one are remembered.
 const EARLIER_WORDS: usize = 3;
 
@@ -128,6 +144,12 @@ pub struct Engine<C: Corrector> {
     observing: bool,
     /// A word the user has now undone often enough to never correct again.
     learned: Option<String>,
+    /// Shown text of a finished word the user went back into (Backspace over
+    /// the space), until that word is finished again.
+    resumed: Option<String>,
+    /// A word finished differently from how it was before the user went back
+    /// into it: (before, after). Taken by the platform layer for the journal.
+    manual_edit: Option<(String, String)>,
     last: Option<LastCorrection>,
     /// Keys of the word just restored by an undo: finishing it unchanged
     /// keeps it as is.
@@ -155,6 +177,8 @@ impl<C: Corrector> Engine<C> {
             select_all: false,
             observing: false,
             learned: None,
+            resumed: None,
+            manual_edit: None,
             last: None,
             just_undone: None,
             undos: HashMap::new(),
@@ -229,6 +253,16 @@ impl<C: Corrector> Engine<C> {
 
     /// The word the user has just undone for the second time, once: to be
     /// remembered for good (the engine itself ignores it for the session).
+    /// A word the user went back into and changed by hand: (before, after).
+    pub fn take_manual_edit(&mut self) -> Option<(String, String)> {
+        self.manual_edit.take()
+    }
+
+    /// The finished words before the one being typed, oldest first.
+    pub fn history(&self) -> Vec<String> {
+        self.earlier.iter().cloned().chain(self.context.clone()).collect()
+    }
+
     pub fn take_learned(&mut self) -> Option<String> {
         self.learned.take()
     }
@@ -281,6 +315,7 @@ impl<C: Corrector> Engine<C> {
         self.committed = 0;
         self.last = None;
         self.just_undone = None;
+        self.resumed = None;
     }
 
     /// Why the last Space did or did not correct the word (for diagnostics).
@@ -322,6 +357,13 @@ impl<C: Corrector> Engine<C> {
         let punct = delimiter != ' ';
         let word = std::mem::take(&mut self.word);
         self.last = None;
+        if let Some(original) = self.resumed.take() {
+            // A word the user went back into and finished differently: a fix
+            // made by hand (only small edits; rewriting a word says nothing).
+            if original != word.shown && !word.shown.is_empty() && edit_distance(&original, &word.shown) <= 3 {
+                self.manual_edit = Some((original, word.shown.clone()));
+            }
+        }
         let shown_len = word.shown.chars().count();
         self.committed += shown_len + 1; // the word and its delimiter
         let untracked = std::mem::take(&mut self.untracked);
@@ -436,6 +478,7 @@ impl<C: Corrector> Engine<C> {
         match self.prev_word.take() {
             Some(prev) => {
                 self.committed = self.committed.saturating_sub(prev.shown.chars().count() + 1);
+                self.resumed = Some(prev.shown.clone());
                 self.word = prev;
             }
             None => match self.committed {
@@ -735,6 +778,53 @@ mod tests {
         e.on_key(Key::Space);
         type_str(&mut e, "c");
         assert_eq!(e.on_key(Key::Backspace), Action::Pass);
+    }
+
+    #[test]
+    fn a_word_fixed_by_hand_is_reported_once() {
+        let mut e = engine();
+        type_str(&mut e, "abc");
+        e.on_key(Key::Space);
+        // Back over the space and the last letter, then a different one.
+        e.on_key(Key::Backspace);
+        e.on_key(Key::Backspace);
+        type_str(&mut e, "d");
+        assert_eq!(e.take_manual_edit(), None); // not finished yet
+        e.on_key(Key::Space);
+        assert_eq!(e.take_manual_edit(), Some(("abc".to_string(), "abd".to_string())));
+        assert_eq!(e.take_manual_edit(), None); // handed out only once
+    }
+
+    #[test]
+    fn retyping_the_same_or_rewriting_a_word_is_not_a_hand_fix() {
+        let mut e = engine();
+        type_str(&mut e, "abc");
+        e.on_key(Key::Space);
+        for _ in 0..2 {
+            e.on_key(Key::Backspace);
+        }
+        type_str(&mut e, "c");
+        e.on_key(Key::Space);
+        assert_eq!(e.take_manual_edit(), None); // same word again
+        type_str(&mut e, "hello");
+        e.on_key(Key::Space);
+        for _ in 0..6 {
+            e.on_key(Key::Backspace);
+        }
+        type_str(&mut e, "world");
+        e.on_key(Key::Space);
+        assert_eq!(e.take_manual_edit(), None); // too different to be a fix
+    }
+
+    #[test]
+    fn history_lists_the_finished_words_before_the_current_one() {
+        let mut e = engine();
+        type_str(&mut e, "one");
+        e.on_key(Key::Space);
+        type_str(&mut e, "two");
+        e.on_key(Key::Space);
+        type_str(&mut e, "thr");
+        assert_eq!(e.history(), ["one", "two"]);
     }
 
     // ---- Vietnamese (Telex) mode ----

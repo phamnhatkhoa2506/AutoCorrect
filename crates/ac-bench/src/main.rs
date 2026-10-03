@@ -606,9 +606,23 @@ fn journal_cases(journal: &Path, out: &Path) {
         let (group, expected, level) = if rejected { ("journal-undone", "=", "goal") } else { ("journal-kept", fix.as_str(), "must") };
         rows.push(format!("j{:03}\t{group}\t{mode}\t{context}\t{keys}\t{expected}\t{level}\tjournal\t{app}", rows.len()));
     }
-    fs::write(out, rows.join("
-") + "
-").expect("write cases");
+    // Words you went back into and fixed by hand: the right answer is what you wrote.
+    let mut seen_edits: BTreeSet<(String, String, String)> = BTreeSet::new();
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let [_, kind, from, to, rest @ ..] = &f[..] else { continue };
+        if *kind != "EDIT" {
+            continue;
+        }
+        let context = rest.first().copied().unwrap_or("");
+        let mode = rest.get(1).copied().unwrap_or("vi");
+        let typed = if mode == "vi" { to_keys(from) } else { (*from).to_string() };
+        if !seen_edits.insert((typed.clone(), (*to).to_string(), context.to_string())) {
+            continue;
+        }
+        rows.push(format!("j{:03}\tjournal-edit\t{mode}\t{context}\t{typed}\t{to}\tgoal\tjournal\tmanual edit", rows.len()));
+    }
+    fs::write(out, rows.join("\n") + "\n").expect("write cases");
     println!("{} cases from {} journal lines -> {}", rows.len() - 1, entries.len(), out.display());
 }
 

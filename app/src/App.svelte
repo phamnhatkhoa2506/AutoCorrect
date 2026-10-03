@@ -240,6 +240,12 @@
               <small>Tránh chữ bị lặp khi trình duyệt tự điền.</small></span></label>
           <label><input type="checkbox" bind:checked={options.journal} onchange={saveOptions} />
             <span>Ghi nhật ký sửa lỗi <small>Để tinh chỉnh sau này; chỉ lưu trên máy này.</small></span></label>
+          <label><input type="checkbox" bind:checked={options.journal_edits} onchange={saveOptions} />
+            <span>Ghi chữ bạn tự sửa tay
+              <small>Khi bạn xóa lùi vào một từ rồi sửa. Lưu từ trước và sau khi sửa. Không ghi trong terminal/IDE. Mặc định tắt.</small></span></label>
+          <label><input type="checkbox" bind:checked={options.journal_hard} onchange={saveOptions} />
+            <span>Ghi ca khó app bỏ qua
+              <small>Từ gõ, 3 từ trước đó và điểm các ứng viên gần nhau. Không ghi trong terminal/IDE. Tối đa 8 MB. Mặc định tắt.</small></span></label>
           <label><input type="checkbox" bind:checked={autostart} onchange={saveAutostart} />
             <span>Khởi động cùng Windows</span></label>
         </section>
