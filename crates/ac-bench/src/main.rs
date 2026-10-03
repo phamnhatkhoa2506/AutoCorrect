@@ -4,6 +4,7 @@
 //!         [--floor F --margin M --ambiguity A --known K --rare P --weight W --language L]
 //!         [--far-floor F --far-ambiguity A --no-list]
 //!         [--bare R --restore-margin M --restore-ambiguity A --restore-english E]
+//!     cargo run -p ac-bench --release -- --export out.jsonl  (samples for the teacher model; --sentences N sets the size)
 //!     cargo run -p ac-bench --release -- --golden [file]    (real and reported cases, bench/golden.tsv)
 //!     cargo run -p ac-bench --release -- --from-journal [journal] [out]   (journal -> bench/journal_cases.tsv)
 //!     cargo run -p ac-bench --release -- --journal [file]   (report on your own journal)
@@ -67,6 +68,8 @@ struct Word {
     history: Vec<String>,
     /// The word that follows it in the sentence (diagnostics only).
     next: Option<String>,
+    /// The words after it, up to three (for the teacher model only).
+    right: Vec<String>,
     /// Written with a capital first letter (names, sentence starts).
     capital: bool,
 }
@@ -113,7 +116,7 @@ fn words(sentence: &str, language: Language) -> Vec<Word> {
         match text {
             Some(text) => {
                 let keys = if language == Language::Vietnamese { to_keys(&text) } else { text.clone() };
-                out.push(Word { text: text.clone(), keys, prev: prev.take(), history: history.clone(), next: None, capital });
+                out.push(Word { text: text.clone(), keys, prev: prev.take(), history: history.clone(), next: None, right: Vec::new(), capital });
                 history.push(text.clone());
                 if history.len() > 3 {
                     history.remove(0);
@@ -141,6 +144,14 @@ fn words(sentence: &str, language: Language) -> Vec<Word> {
     for i in 1..out.len() {
         if out[i].prev.as_deref() == Some(out[i - 1].text.as_str()) {
             out[i - 1].next = Some(out[i].text.clone());
+        }
+    }
+    for i in 0..out.len() {
+        let mut j = i + 1;
+        while j < out.len() && j < i + 4 && out[j].prev.as_deref() == Some(out[j - 1].text.as_str()) {
+            let word = out[j].text.clone();
+            out[i].right.push(word);
+            j += 1;
         }
     }
     out
@@ -601,6 +612,81 @@ fn journal_cases(journal: &Path, out: &Path) {
     println!("{} cases from {} journal lines -> {}", rows.len() - 1, entries.len(), out.display());
 }
 
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Writes one JSON line per word position, for the teacher model and for
+/// training (see `bench/README.md`): the left context the app sees, the right
+/// context only the teacher may see, the keys typed, the truth, the error
+/// class, and the candidates the corrector would weigh with its score.
+fn export(
+    corrector: &SmartCorrector,
+    cases: &[Case],
+    set: &str,
+    language: Language,
+    out: &mut impl std::io::Write,
+    counts: &mut std::collections::BTreeMap<String, [u32; 2]>,
+) {
+    for (n, case) in cases.iter().enumerate() {
+        let history: Vec<&str> = case.word.history.iter().map(String::as_str).collect();
+        let (keys, class) = match &case.typed {
+            None => (typed_as(&case.word.keys, case.word.capital), "clean"),
+            Some(t) => {
+                let class = if case.bare {
+                    "no-marks"
+                } else if is_two_slips(&case.word.keys, t) {
+                    "two-slips"
+                } else {
+                    "one-slip"
+                };
+                (typed_as(t, case.word.capital), class)
+            }
+        };
+        let ranking = if case.bare && !case.word.capital { corrector.rank_bare(&keys, &history) } else { corrector.rank_in(&keys, &history) };
+        let shown = if language == Language::Vietnamese { ac_telex::compose(&keys).text } else { keys.clone() };
+        let (typed_score, candidates) = ranking.map_or((f64::NEG_INFINITY, Vec::new()), |r| (r.typed, r.candidates));
+        let score = |s: f64| if s.is_finite() { s } else { -99.0 };
+        let truth_in = shown.to_lowercase() == case.word.text || candidates.iter().take(8).any(|(w, _)| *w == case.word.text);
+        let mut cands: Vec<String> = candidates
+            .iter()
+            .take(8)
+            .map(|(w, s)| format!("{{\"t\":{},\"s\":{:.3}}}", json_str(w), score(*s)))
+            .collect();
+        cands.push(format!("{{\"t\":{},\"keep\":true,\"s\":{:.3}}}", json_str(&shown), score(typed_score)));
+        let list = |words: &[String]| words.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(",");
+        let id = format!("{set}-{n}");
+        let line = format!(
+            "{{\"id\":{},\"set\":{},\"context\":[{}],\"right\":[{}],\"typed\":{},\"shown\":{},\"truth\":{},\"class\":\"{class}\",\"capital\":{},\"real\":{},\"truth_in\":{truth_in},\"candidates\":[{}]}}",
+            json_str(&id),
+            json_str(set),
+            list(&case.word.history),
+            list(&case.word.right),
+            json_str(&keys),
+            json_str(&shown),
+            json_str(&case.word.text),
+            case.word.capital,
+            typed_score.is_finite(),
+            cands.join(",")
+        );
+        writeln!(out, "{line}").expect("write export");
+        let tally = counts.entry(format!("{set} {class}")).or_default();
+        tally[0] += 1;
+        tally[1] += u32::from(truth_in);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--journal") {
@@ -716,6 +802,12 @@ fn main() {
             }
         }
     }
+    let mut export_out = args
+        .iter()
+        .position(|a| a == "--export")
+        .and_then(|i| args.get(i + 1))
+        .map(|p| std::io::BufWriter::new(fs::File::create(p).expect("export file")));
+    let mut export_counts = std::collections::BTreeMap::new();
     for ((name, language, _), all) in sets.into_iter().zip(alls) {
         let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
         let cases: Vec<Case> = all
@@ -731,6 +823,11 @@ fn main() {
                 Case { word, typed, bare: false }
             })
             .collect();
+        if let Some(out) = export_out.as_mut() {
+            corrector.set_context(true);
+            let set = if name == "English" { "en" } else if name.contains("dialogue") { "vd" } else { "vi" };
+            export(&corrector, &cases, set, language, out, &mut export_counts);
+        }
         if name.starts_with("Vietnamese") && args.iter().any(|a| a == "--diagnose") {
             corrector.set_context(true);
             diagnose(&corrector, &cases);
@@ -748,6 +845,14 @@ fn main() {
             if stripped.n > 0 {
                 println!("              no marks : {}", stripped.row());
             }
+        }
+    }
+    if let Some(mut out) = export_out {
+        use std::io::Write;
+        out.flush().expect("flush export");
+        println!("\nexported (samples, share with the right word among the candidates):");
+        for (key, [n, hit]) in &export_counts {
+            println!("  {key:<22} {n:>8}   {:>5.1}%", 100.0 * f64::from(*hit) / f64::from((*n).max(1)));
         }
     }
     println!("\n({:.0}s)", started.elapsed().as_secs_f64());

@@ -20,3 +20,23 @@ Mỗi dòng (cột cách nhau bằng Tab; dòng bắt đầu bằng `#` bị b�
 
 Chương trình thoát với mã 1 nếu có ca `must` trượt. Ca `goal` chỉ được in ra.
 Thêm ca mới: nối dòng vào cuối file, giữ nguyên số cột.
+
+## Xuất mẫu cho mô hình thầy (`--export`)
+
+    cargo run -p ac-bench --release -- --export out.jsonl --sentences 3000
+
+Mỗi dòng là một vị trí từ trong câu thật của kho công khai (tin tức, web, phụ đề), với lỗi mô phỏng.
+Không chứa dữ liệu của người dùng. Trường chính:
+
+| Trường | Ý nghĩa |
+|---|---|
+| `set` | `vi` (tin tức/web), `vd` (hội thoại phụ đề), `en` |
+| `context` | tối đa 3 từ **bên trái** (thứ app nhìn thấy) |
+| `right` | tối đa 3 từ **bên phải** (chỉ dành cho thầy, trò không được thấy) |
+| `typed`, `shown` | phím đã gõ, và chữ hiện trên màn hình |
+| `truth`, `class` | đáp án; `clean`, `one-slip`, `two-slips`, `no-marks` |
+| `real` | chữ đã gõ tự nó là một từ hợp lệ |
+| `candidates` | tối đa 8 ứng viên của bộ sửa lỗi kèm điểm `s`, cộng một ứng viên `keep` (giữ nguyên) |
+| `truth_in` | đáp án có nằm trong danh sách ứng viên hay không |
+
+`--sentences N` chọn số câu mỗi tập; số mẫu khoảng 40 lần số câu cho tiếng Việt.

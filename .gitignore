@@ -1,3 +1,4 @@
 /target
 /data/raw/
 /bench/journal_cases.tsv
+/bench/*.jsonl
