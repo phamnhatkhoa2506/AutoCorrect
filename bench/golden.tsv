@@ -1,0 +1,37 @@
+id	group	mode	context	typed	expected	level	source	note
+g001	en-typo	en		teh	the	must	user	
+g002	en-typo	en		TEH	THE	must	user	caps kept
+g003	en-typo	en		Recieve	Receive	must	user	caps kept
+g004	en-typo	en		seperate	separate	must	list	
+g005	en-typo	en		definately	definitely	must	list	
+g006	en-typo	en		occured	occurred	must	list	
+g007	en-typo	en		untill	until	must	list	
+g008	en-typo	en		thier	their	must	list	
+g009	en-keep	en		hello	=	must	synthetic	good word
+g010	en-keep	en		the	=	must	synthetic	good word
+g011	vi-telex	vi		dunhf	dùng	must	user	mistyped Telex
+g012	vi-telex	vi		nhnah	nhanh	must	synthetic	transposed
+g013	vi-telex	vi		khogn	không	must	synthetic	two slips
+g014	vi-telex	vi		mooir	mỗi	must	synthetic	hoi/nga mixed up
+g015	vi-telex	vi		gruwi	gửi	must	synthetic	
+g016	vi-keep	vi		dungf	=	must	user	valid Telex: the engine composes it
+g017	vi-keep	vi		tieengs	=	must	synthetic	valid Telex
+g018	vi-keep	vi		anj	=	must	synthetic	tone typed on purpose
+g019	vi-keep	vi		ieets	=	must	synthetic	not siet
+g020	vi-keep	vi		khoi	=	must	synthetic	no tone typed: do not guess
+g021	vi-bare	vi	tôi	khong	không	must	user	typed without marks
+g022	vi-bare	vi	không	duoc	được	must	synthetic	
+g023	vi-bare	vi		ban	=	must	user	ambiguous bare word: leave alone
+g024	vi-bare	vi	tôi mua	ban	bán	goal	synthetic	mua ban
+g025	vi-bare	vi	cho mình đi	ban	bạn	goal	user	needs more than counts; also arguably ambiguous
+g026	vi-bare	vi	nhanh	hon	hơn	goal	user	from Cos ve nhanh hon khi nay (unverified)
+g027	vi-bare	vi	khi	nay	nãy	goal	user	from Cos ve nhanh hon khi nay (unverified)
+g028	vi-name	vi	anh	Nguyen	=	must	synthetic	names are left alone
+g029	vi-name	vi		Tuan	=	must	synthetic	
+g030	vi-name	vi		Khong	=	must	synthetic	capital: could be a name
+g031	code	code		git	=	must	synthetic	terminal word
+g032	code	code		npm	=	must	synthetic	
+g033	code	code		kubectl	=	must	synthetic	
+g034	code	code		cargo	=	must	synthetic	
+g035	code	code		teh	=	must	synthetic	no English corrections in terminals
+g036	mixed	vi	pioneering	launh	=	must	synthetic	English phrase: not anh

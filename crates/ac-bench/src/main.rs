@@ -4,6 +4,7 @@
 //!         [--floor F --margin M --ambiguity A --known K --rare P --weight W --language L]
 //!         [--far-floor F --far-ambiguity A --no-list]
 //!         [--bare R --restore-margin M --restore-ambiguity A --restore-english E]
+//!     cargo run -p ac-bench --release -- --golden [file]    (real and reported cases, bench/golden.tsv)
 //!     cargo run -p ac-bench --release -- --journal [file]   (report on your own journal)
 //!
 //! Every word of real sentences (never seen in training: the last
@@ -490,6 +491,72 @@ fn journal_report(path: &Path) {
     }
 }
 
+/// The golden set: real and reported cases in `bench/golden.tsv` (see its
+/// header). "must" cases may never fail; "goal" cases are tracked, and are
+/// expected to fail until the model improves. Returns whether every "must"
+/// case passed.
+fn golden(corrector: &mut SmartCorrector, path: &Path) -> bool {
+    use std::collections::BTreeMap;
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    // group -> [must passed, must total, goal passed, goal total]
+    let mut groups: BTreeMap<String, [u32; 4]> = BTreeMap::new();
+    let mut failures: Vec<String> = Vec::new();
+    for line in text.lines().skip(1).filter(|l| !l.trim().is_empty() && !l.starts_with('#')) {
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() < 7 {
+            eprintln!("skipped (too few columns): {line}");
+            continue;
+        }
+        let (id, group, mode, context, typed, expected, level) = (f[0], f[1], f[2], f[3], f[4], f[5], f[6]);
+        match mode {
+            "en" => {
+                corrector.set_languages(false, true);
+                corrector.set_restore_marks(false);
+            }
+            "code" => {
+                corrector.set_languages(true, false);
+                corrector.set_restore_marks(false);
+            }
+            _ => {
+                corrector.set_languages(true, true);
+                corrector.set_restore_marks(true);
+            }
+        }
+        let history: Vec<&str> = context.split_whitespace().collect();
+        let got = corrector.correct_in(typed, &history);
+        let want = (expected != "=").then(|| expected.to_string());
+        let ok = got == want;
+        let tally = groups.entry(group.to_string()).or_default();
+        let at = if level == "goal" { 2 } else { 0 };
+        tally[at + 1] += 1;
+        tally[at] += u32::from(ok);
+        if !ok {
+            let show = |v: &Option<String>| v.as_deref().map_or("(unchanged)".to_string(), |s| format!("{s:?}"));
+            failures.push(format!(
+                "  [{level}] {id} {group}: {typed:?} after {context:?} -> {}, expected {}",
+                show(&got),
+                show(&want)
+            ));
+        }
+    }
+    println!("{:<10} {:>12} {:>12}", "group", "must", "goal");
+    let mut total = [0u32; 4];
+    for (group, t) in &groups {
+        println!("{group:<10} {:>7}/{:<4} {:>7}/{:<4}", t[0], t[1], t[2], t[3]);
+        for i in 0..4 {
+            total[i] += t[i];
+        }
+    }
+    println!("{:<10} {:>7}/{:<4} {:>7}/{:<4}", "TOTAL", total[0], total[1], total[2], total[3]);
+    if !failures.is_empty() {
+        println!("\nnot passing:");
+        for line in &failures {
+            println!("{line}");
+        }
+    }
+    total[0] == total[1]
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--journal") {
@@ -545,6 +612,10 @@ fn main() {
         .with_trigrams(vi_tri, en_tri)
         .with_misspellings(&misspellings);
     corrector.set_tuning(tuning);
+    if let Some(i) = args.iter().position(|a| a == "--golden") {
+        let path = args.get(i + 1).filter(|a| !a.starts_with("--")).map(PathBuf::from).unwrap_or_else(|| root.join("bench/golden.tsv"));
+        std::process::exit(if golden(&mut corrector, &path) { 0 } else { 1 });
+    }
     println!("{tuning:?}");
 
     let started = Instant::now();
