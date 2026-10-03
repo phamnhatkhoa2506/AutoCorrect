@@ -35,3 +35,5 @@ g033	code	code		kubectl	=	must	synthetic
 g034	code	code		cargo	=	must	synthetic	
 g035	code	code		teh	=	must	synthetic	no English corrections in terminals
 g036	mixed	vi	pioneering	launh	launch	must	synthetic	English slip after English: launch, never anh
+g037	vi-telex	vi	bạn	thics	thích	must	user	missing h: thic is not a syllable
+g038	vi-telex	vi	bạn thích tớ	chuww	chứ	goal	user	w typed instead of s; chưa (11.3) and chứ (11.2) nearly tie
