@@ -626,6 +626,19 @@ fn journal_cases(journal: &Path, out: &Path) {
     println!("{} cases from {} journal lines -> {}", rows.len() - 1, entries.len(), out.display());
 }
 
+/// A following word as the user may have typed it: with probability `rate` it carries one slip.
+fn noisy_word(word: &str, language: Language, rate: f64, rng: &mut Rng) -> String {
+    if rate <= 0.0 || !rng.chance(rate) {
+        return word.to_string();
+    }
+    let keys = if language == Language::Vietnamese { to_keys(word) } else { word.to_string() };
+    match typo(&keys, language, false, rng) {
+        Some(typed) if language == Language::Vietnamese => ac_telex::compose(&typed).text,
+        Some(typed) => typed,
+        None => word.to_string(),
+    }
+}
+
 fn json_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -652,7 +665,9 @@ fn export(
     language: Language,
     out: &mut impl std::io::Write,
     counts: &mut std::collections::BTreeMap<String, [u32; 2]>,
+    right_typo: f64,
 ) {
+    let mut rng = Rng(0x5DEE_CE66_D1CE_4E5B);
     for (n, case) in cases.iter().enumerate() {
         let history: Vec<&str> = case.word.history.iter().map(String::as_str).collect();
         let (keys, class) = match &case.typed {
@@ -672,7 +687,9 @@ fn export(
         let shown = if language == Language::Vietnamese { ac_telex::compose(&keys).text } else { keys.clone() };
         let (typed_score, candidates) = ranking.map_or((f64::NEG_INFINITY, Vec::new()), |r| (r.typed, r.candidates));
         let score = |s: f64| if s.is_finite() { s } else { -99.0 };
-        let right_score = |candidate: &str| corrector.right_context_score(language == Language::Vietnamese, &history, candidate, &case.word.right);
+        // What the user has typed after this word, possibly with slips of its own.
+        let seen_right: Vec<String> = case.word.right.iter().map(|w| noisy_word(w, language, right_typo, &mut rng)).collect();
+        let right_score = |candidate: &str| corrector.right_context_score(language == Language::Vietnamese, &history, candidate, &seen_right);
         let truth_in = shown.to_lowercase() == case.word.text || candidates.iter().take(8).any(|(w, _)| *w == case.word.text);
         let mut cands: Vec<String> = candidates
             .iter()
@@ -680,6 +697,21 @@ fn export(
             .map(|(w, s)| format!("{{\"t\":{},\"s\":{:.3},\"r\":{:.3}}}", json_str(w), score(*s), right_score(w)))
             .collect();
         cands.push(format!("{{\"t\":{},\"keep\":true,\"s\":{:.3},\"r\":{:.3}}}", json_str(&shown), score(typed_score), right_score(&shown)));
+        // Candidates the app does not consider: letters changed in a well-formed syllable (flag x).
+        if language == Language::Vietnamese && !(case.bare && !case.word.capital) {
+            let base: Vec<&str> = candidates.iter().take(8).map(|(w, _)| w.as_str()).collect();
+            let extra: Vec<(String, f64)> = corrector
+                .rank_expanded(&keys, &history)
+                .map(|r| r.candidates)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|(w, _)| !base.contains(&w.as_str()))
+                .take(8)
+                .collect();
+            for (w, s) in extra {
+                cands.push(format!("{{\"t\":{},\"s\":{:.3},\"r\":{:.3},\"x\":true}}", json_str(&w), score(s), right_score(&w)));
+            }
+        }
         let list = |words: &[String]| words.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(",");
         let id = format!("{set}-{n}");
         let line = format!(
@@ -842,7 +874,7 @@ fn main() {
         if let Some(out) = export_out.as_mut() {
             corrector.set_context(true);
             let set = if name == "English" { "en" } else if name.contains("dialogue") { "vd" } else if name.contains("social") { "vs" } else { "vi" };
-            export(&corrector, &cases, set, language, out, &mut export_counts);
+            export(&corrector, &cases, set, language, out, &mut export_counts, flag("--right-typo", 0.0));
         }
         if name.starts_with("Vietnamese") && args.iter().any(|a| a == "--diagnose") {
             corrector.set_context(true);

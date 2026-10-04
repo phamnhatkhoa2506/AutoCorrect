@@ -1,0 +1,41 @@
+accuracy,en,clean,18712,1.0,0.953,0.9538
+accuracy,en,one-slip,2720,0.8621,0.9085,0.9257
+accuracy,en,two-slips,157,0.5286,0.7516,0.8344
+accuracy,vd,clean,8869,1.0,0.9942,0.995
+accuracy,vd,no-marks,432,0.9133,0.9005,0.9537
+accuracy,vd,one-slip,1144,0.7366,0.9292,0.9607
+accuracy,vd,two-slips,37,0.3814,0.973,0.973
+accuracy,vi,clean,28294,0.9999,0.9958,0.9963
+accuracy,vi,no-marks,1380,0.9139,0.9058,0.9587
+accuracy,vi,one-slip,3364,0.7242,0.9316,0.9676
+accuracy,vi,two-slips,169,0.487,0.9349,0.9763
+accuracy,vs,clean,14001,1.0,0.9933,0.9936
+accuracy,vs,no-marks,781,0.9899,0.8156,0.8566
+accuracy,vs,one-slip,1723,0.7282,0.8601,0.9066
+accuracy,vs,two-slips,82,0.4824,0.8537,0.8902
+expanded,vd,no-marks,473,0.9133,0.9302,0.871,0.8795
+expanded,vd,one-slip,1553,0.7366,0.9556,0.7077,0.8873
+expanded,vd,two-slips,97,0.3814,0.4124,0.3711,0.3918
+expanded,vi,no-marks,1510,0.9139,0.9364,0.8762,0.894
+expanded,vi,one-slip,4645,0.7242,0.9559,0.7008,0.8969
+expanded,vi,two-slips,347,0.487,0.5418,0.4755,0.5216
+expanded,vs,one-slip,2366,0.7282,0.9522,0.6602,0.7988
+expanded,vs,two-slips,170,0.4824,0.5412,0.4294,0.4588
+safe,ngram,0.5,12492,9855,2637,14.668
+safe,ngram,0.9,9600,8598,1002,5.81
+safe,ngram,0.99,7266,6864,402,2.662
+safe,ngram,0.999,5450,5207,243,1.903
+safe,ngram,0.9999,4019,3817,202,1.775
+safe,ngram,0.99999,3102,2907,195,1.775
+safe,ngram_right,0.5,12811,10366,2445,14.21
+safe,ngram_right,0.9,10690,9612,1078,6.368
+safe,ngram_right,0.99,8960,8450,510,3.048
+safe,ngram_right,0.999,7438,7110,328,2.118
+safe,ngram_right,0.9999,6074,5821,253,1.903
+safe,ngram_right,0.99999,4879,4660,219,1.832
+safe,ngram_right + expanded,0.5,15122,11913,3209,25.444
+safe,ngram_right + expanded,0.9,11985,10845,1140,8.429
+safe,ngram_right + expanded,0.99,9825,9332,493,3.578
+safe,ngram_right + expanded,0.999,8028,7714,314,2.361
+safe,ngram_right + expanded,0.9999,6429,6181,248,2.003
+safe,ngram_right + expanded,0.99999,5086,4867,219,1.86

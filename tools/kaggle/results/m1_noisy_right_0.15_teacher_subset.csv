@@ -1,0 +1,48 @@
+accuracy,en,clean,2000,1.0,0.953,0.952,0.856,0.9085
+accuracy,en,one-slip,1726,0.863,0.92,0.9386,0.8778,0.9415
+accuracy,en,two-slips,157,0.5286,0.7516,0.8344,0.8599,0.9363
+accuracy,vd,clean,2000,1.0,0.996,0.9955,0.9525,0.976
+accuracy,vd,no-marks,432,0.9133,0.9005,0.9537,0.794,0.9144
+accuracy,vd,one-slip,1144,0.7366,0.9292,0.9607,0.8435,0.9397
+accuracy,vd,two-slips,37,0.3814,0.973,0.973,0.8919,0.9189
+accuracy,vi,clean,2000,1.0,0.9945,0.994,0.952,0.979
+accuracy,vi,no-marks,1380,0.9139,0.9058,0.9587,0.8152,0.937
+accuracy,vi,one-slip,1468,0.734,0.9339,0.9707,0.8787,0.9619
+accuracy,vi,two-slips,169,0.487,0.9349,0.9763,0.8935,0.9645
+accuracy,vs,clean,2000,1.0,0.9945,0.9935,0.9235,0.9655
+accuracy,vs,no-marks,781,0.9899,0.8156,0.8566,0.7324,0.8476
+accuracy,vs,one-slip,1466,0.733,0.8561,0.9038,0.8206,0.9038
+accuracy,vs,two-slips,82,0.4824,0.8537,0.8902,0.8049,0.9146
+expanded,vd,no-marks,473,0.9133,0.9302,0.871,0.8795
+expanded,vd,one-slip,1553,0.7366,0.9556,0.7077,0.8873
+expanded,vd,two-slips,97,0.3814,0.4124,0.3711,0.3918
+expanded,vi,no-marks,1510,0.9139,0.9364,0.8762,0.894
+expanded,vi,one-slip,2000,0.734,0.957,0.7125,0.8975
+expanded,vi,two-slips,347,0.487,0.5418,0.4755,0.5216
+expanded,vs,one-slip,2000,0.733,0.9505,0.6625,0.7975
+expanded,vs,two-slips,170,0.4824,0.5412,0.4294,0.4588
+safe,ngram,0.5,8610,7275,1335,13.75
+safe,ngram,0.7,7830,6913,917,9.875
+safe,ngram,0.9,6755,6260,495,6.0
+safe,ngram,0.97,5845,5562,283,3.125
+safe,ngram,0.99,5097,4913,184,2.25
+safe,ngram_right,0.5,8882,7677,1205,15.125
+safe,ngram_right,0.7,8319,7468,851,10.75
+safe,ngram_right,0.9,7585,7069,516,5.875
+safe,ngram_right,0.97,6962,6615,347,3.5
+safe,ngram_right,0.99,6395,6146,249,2.625
+safe,teacher_left,0.5,9250,6718,2532,70.625
+safe,teacher_left,0.7,8070,6362,1708,47.375
+safe,teacher_left,0.9,6522,5655,867,21.25
+safe,teacher_left,0.97,5339,4888,451,9.75
+safe,teacher_left,0.99,4479,4217,262,4.75
+safe,teacher_full,0.5,9447,7619,1828,39.875
+safe,teacher_full,0.7,8755,7438,1317,26.5
+safe,teacher_full,0.9,7825,7046,779,13.625
+safe,teacher_full,0.97,7041,6605,436,6.25
+safe,teacher_full,0.99,6409,6124,285,3.25
+safe,ngram_right + expanded,0.5,9936,8635,1301,25.375
+safe,ngram_right + expanded,0.7,9208,8358,850,14.75
+safe,ngram_right + expanded,0.9,8283,7808,475,6.875
+safe,ngram_right + expanded,0.97,7536,7236,300,4.0
+safe,ngram_right + expanded,0.99,6867,6650,217,3.125

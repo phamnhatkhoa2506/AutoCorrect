@@ -445,13 +445,13 @@ impl SmartCorrector {
     }
 
     /// Corrections of `keys` one slip away, best first.
-    fn candidates(&self, keys: &str, vietnamese: Option<String>, ctx: Context) -> Vec<(String, f64)> {
+    fn candidates(&self, keys: &str, vietnamese: Option<String>, ctx: Context, restrict: bool) -> Vec<(String, f64)> {
         // A well-formed syllable was typed: Vietnamese syllables are so dense
         // that changing a letter almost always lands on another one ("khoi" ->
         // "khi", "iết" -> "siết"), a real-word correction that needs context.
         // Only the kind of mark may change (hỏi <-> ngã, ô <-> ơ): same letters,
         // and a tone stays a tone ("ạn" was typed with "j" on purpose).
-        let required = vietnamese.as_deref().map(skeleton);
+        let required = vietnamese.as_deref().map(skeleton).filter(|_| restrict);
         let typed_texts: Vec<String> = std::iter::once(keys.to_string()).chain(vietnamese).collect();
 
         // Several slips can lead to the same word: their probabilities add up.
@@ -558,6 +558,16 @@ impl SmartCorrector {
         ))
     }
 
+    /// Diagnostics: like [`Self::rank_in`], but a well-formed syllable may also be
+    /// corrected by changing letters, not only marks. The app does not do this: such a
+    /// correction needs more evidence than the word before.
+    pub fn rank_expanded(&self, word: &str, history: &[&str]) -> Option<Ranking> {
+        let keys = Self::keys_of(word)?;
+        let (typed, vietnamese) = self.typed(&keys);
+        let ctx = self.context_of(history);
+        Some(Ranking { typed, candidates: self.candidates(&keys, vietnamese, ctx, false) })
+    }
+
     /// Diagnostics for a word typed without marks: the score of the bare word
     /// and of its accented readings, best first (what `restore_marks` weighs).
     pub fn rank_bare(&self, keys: &str, history: &[&str]) -> Option<Ranking> {
@@ -622,7 +632,7 @@ impl SmartCorrector {
         let keys = Self::keys_of(word)?;
         let (typed, vietnamese) = self.typed(&keys);
         let ctx = self.context_of(history);
-        let mut candidates = self.candidates(&keys, vietnamese, ctx);
+        let mut candidates = self.candidates(&keys, vietnamese, ctx, true);
         let t = &self.tuning;
         if confident(&candidates, typed, t.margin, t.floor, t.ambiguity).is_none() && typed == f64::NEG_INFINITY && keys.len() >= FAR_MIN_KEYS {
             candidates = self.far_candidates(&keys, ctx);
@@ -704,7 +714,7 @@ impl Corrector for SmartCorrector {
         // Rare entries are often misspellings that leaked into the corpora.
         let typed_penalised = typed - self.tuning.rare_typed_penalty;
 
-        let near = self.candidates(&keys, vietnamese, ctx);
+        let near = self.candidates(&keys, vietnamese, ctx, true);
         let t = &self.tuning;
         if let Some(best) = confident(&near, typed_penalised, t.margin, t.floor, t.ambiguity) {
             return Some(match_case(word, best));
