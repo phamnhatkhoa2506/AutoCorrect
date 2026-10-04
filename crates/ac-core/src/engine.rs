@@ -244,6 +244,13 @@ impl<C: Corrector> Engine<C> {
     /// composed or corrected) but are still tracked, so that the word is
     /// whole when observing ends.
     pub fn set_observing(&mut self, on: bool) {
+        // A word already being composed stays composed: a focus event in the middle of it
+        // (a page refreshing, a suggestion list...) says nothing about this field, and
+        // turning the rest of the word into raw letters ("vieetj") looks like Vietnamese
+        // typing that stopped working.
+        if on && !self.observing && !self.word.keys.is_empty() {
+            return;
+        }
         self.observing = on;
     }
 
@@ -1253,6 +1260,20 @@ mod tests {
         e.on_key(Key::Backspace);
         type_str(&mut e, "teh");
         assert_eq!(e.on_key(Key::Space), Action::Pass);
+    }
+
+    #[test]
+    fn a_focus_event_in_the_middle_of_a_word_does_not_spoil_it() {
+        let mut e = vn_engine();
+        press(&mut e, "tiee");
+        e.set_observing(true); // arrives between two keys of the same word
+        press(&mut e, "ngs");
+        assert_eq!(e.current_word(), "tiếng");
+        // A word that starts while observing is still held back (it may be a password).
+        e.on_key(Key::Space);
+        e.set_observing(true);
+        press(&mut e, "vieetj");
+        assert_eq!(e.current_word(), "vieetj");
     }
 
     #[test]

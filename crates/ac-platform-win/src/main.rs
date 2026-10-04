@@ -66,8 +66,14 @@ unsafe extern "system" fn watchdog(_: HWND, _: u32, _: usize, _: u32) {
     let _ = UnhookWindowsHookEx(keyboard);
     let _ = UnhookWindowsHookEx(mouse);
     match install() {
-        Ok(()) => log::info("hooks were silent while you typed: installed them again".into()),
-        Err(e) => log::info(format!("could not install the hooks again: {e}")),
+        Ok(()) => {
+            log::info("hooks were silent while you typed: installed them again".into());
+            log::event("keyboard hooks were silent while you typed: installed them again".into());
+        }
+        Err(e) => {
+            log::info(format!("could not install the hooks again: {e}"));
+            log::event(format!("could not install the keyboard hooks again: {e}"));
+        }
     }
 }
 

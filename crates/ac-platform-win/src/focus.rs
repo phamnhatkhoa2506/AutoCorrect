@@ -76,8 +76,19 @@ pub fn start() {
         while rx.recv().is_ok() {
             while rx.try_recv().is_ok() {} // only the latest focus matters
             let generation = GENERATION.load(Ordering::Relaxed);
+            let asked = Instant::now();
             let element = automation.as_ref().and_then(|a| a.GetFocusedElement().ok());
             let password = element.is_some_and(|e| is_password_field(&e, &mut seen_masked));
+            let took = asked.elapsed().as_millis();
+            // A password flag that stays on until a slow answer arrives keeps every key
+            // untouched: say so.
+            if password != was_password || took > 300 {
+                log::event(format!(
+                    "focus check: password field {} (took {took} ms{})",
+                    if password { "yes" } else { "no" },
+                    if GENERATION.load(Ordering::Relaxed) == generation { "" } else { ", already stale" }
+                ));
+            }
             if password != was_password && log::debug_enabled() {
                 log::debug(format!("focus: {}", if password { "password field (hands off)" } else { "normal field" }));
             }

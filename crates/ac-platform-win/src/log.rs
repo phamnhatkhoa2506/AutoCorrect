@@ -25,6 +25,7 @@ pub struct Event {
 }
 
 enum Msg {
+    Event(String),
     Correction(Event),
     Debug(String),
     Info(String),
@@ -44,6 +45,13 @@ pub fn start(debug: bool) {
         for msg in rx {
             let e = match msg {
                 Msg::Correction(e) => e,
+                Msg::Event(line) => {
+                    append_event(&line);
+                    if debug_enabled() {
+                        println!("  ! {line}");
+                    }
+                    continue;
+                }
                 Msg::Debug(line) => {
                     println!("  · {line}");
                     continue;
@@ -100,6 +108,35 @@ pub fn send(event: Event) {
 
 pub fn debug_enabled() -> bool {
     DEBUG.load(Ordering::Relaxed)
+}
+
+/// One line for `events.log`: what the app decided about the keyboard (hands off in a
+/// password field, typing not composed, the mode switched, hooks reinstalled...).
+/// Always on and cheap, and never holds anything that was typed: when typing
+/// "stops working for a while" this says why.
+pub fn event(line: String) {
+    if let Some(tx) = TX.get() {
+        let _ = tx.send(Msg::Event(line));
+    }
+}
+
+fn append_event(line: &str) {
+    use std::io::Write;
+    let Some(dir) = ac_config::paths::config_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("events.log");
+    // One older generation, so the file never grows without bound.
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 256_000) {
+        let _ = std::fs::rename(&path, dir.join("events.old.log"));
+    }
+    let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(
+            file,
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}  {line}",
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
+        );
+    }
 }
 
 /// One line for the personal dictionary (a word learned from an undo).

@@ -44,6 +44,11 @@ struct State {
     personal_stamp: Option<std::time::SystemTime>,
     apps_stamp: Option<std::time::SystemTime>,
     settings_stamp: Option<std::time::SystemTime>,
+    /// Since when keys pass untouched because a password field has focus, and how many.
+    hands_off_since: Option<(Instant, u32)>,
+    /// Keys typed while the focus check was pending (not composed), since the last log line.
+    observed_keys: u32,
+    observed_logged: Option<Instant>,
 }
 
 impl State {
@@ -102,7 +107,14 @@ impl State {
             self.classify_process(&name);
         }
         if let Some(text) = changed(ac_config::paths::settings_path(), &mut self.settings_stamp) {
-            let new = Settings::parse(&text);
+            let mut new = Settings::parse(&text);
+            // Whether Vietnamese is on and whether the app is paused belong to this run
+            // (the tray and the hotkey change them), not to whatever the file said last.
+            if new.vietnamese != self.settings.vietnamese || new.paused != self.settings.paused {
+                log::event("settings file changed the mode or the pause: kept this run's values".into());
+            }
+            new.vietnamese = self.settings.vietnamese;
+            new.paused = self.settings.paused;
             if new != self.settings {
                 self.settings = new;
                 self.apply();
@@ -130,6 +142,9 @@ thread_local! {
         personal_stamp: None,
         apps_stamp: None,
         settings_stamp: None,
+        hands_off_since: None,
+        observed_keys: 0,
+        observed_logged: None,
     });
 }
 
@@ -182,12 +197,19 @@ pub fn settings() -> Settings {
 /// Changes the settings (tray menu, Alt+Z). Saving and redrawing the icon
 /// happen later on the tray window, never inside the hook.
 pub fn update(change: impl FnOnce(&mut Settings)) {
-    let s = STATE.with(|cell| {
+    let (s, was) = STATE.with(|cell| {
         let mut state = cell.borrow_mut();
+        let was = state.settings;
         change(&mut state.settings);
         state.apply();
-        state.settings
+        (state.settings, was)
     });
+    if s.vietnamese != was.vietnamese {
+        log::event(format!("Vietnamese {}", if s.vietnamese { "on" } else { "off" }));
+    }
+    if s.paused != was.paused {
+        log::event(format!("paused {}", if s.paused { "on" } else { "off" }));
+    }
     tray::changed();
     log::info(format!(
         "mode: {}, corrections {}{}",
@@ -203,6 +225,8 @@ pub fn set_app(name: &str) {
         let mut state = cell.try_borrow_mut().ok()?;
         state.reload_files();
         state.classify_process(name);
+        // A key-up seen by another window must not leave a modifier "held" here.
+        state.detector.reset();
         Some(state.app)
     });
     if let (Some(kind), true) = (kind, log::debug_enabled()) {
@@ -271,6 +295,7 @@ fn hotkey_event(vk: u16, down: bool) -> bool {
     if outcome == Outcome::None {
         return false;
     }
+    log::event("hotkey pressed".into());
     update(|s| s.vietnamese = !s.vietnamese);
     if alt {
         // Alt released alone would open the menu bar of the program.
@@ -305,8 +330,18 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         };
         if state.hands_off() {
             // Password field, paused, or a hands-off app: keep nothing.
+            if focus::password() && state.hands_off_since.is_none() {
+                state.hands_off_since = Some((Instant::now(), 0));
+                log::event(format!("hands off: a password field has focus ({})", state.process));
+            }
+            if let Some((_, keys)) = state.hands_off_since.as_mut() {
+                *keys += 1;
+            }
             state.engine.on_key(Key::Reset);
             return None;
+        }
+        if let Some((since, keys)) = state.hands_off_since.take() {
+            log::event(format!("hands off ended after {} ms, {keys} key(s) passed untouched", since.elapsed().as_millis()));
         }
         if state.foreground != foreground {
             // Ask the window itself: WinEvents can arrive late or out of
@@ -316,12 +351,26 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             state.reload_files();
             state.classify_process(&name);
             state.engine.on_key(Key::Reset);
+            state.detector.reset();
             if state.hands_off() {
                 return None;
             }
         }
         // Not yet known whether this is a password field: follow, do not act.
-        state.engine.set_observing(focus::pending());
+        let checking = focus::pending();
+        if checking && state.settings.vietnamese && matches!(key, Key::Char(_)) {
+            // Typed right after a focus change, before the check answered: not composed.
+            state.observed_keys += 1;
+            if state.observed_logged.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(2)) {
+                log::event(format!(
+                    "{} key(s) typed while the focus check was pending, so not composed ({})",
+                    state.observed_keys, state.process
+                ));
+                state.observed_keys = 0;
+                state.observed_logged = Some(Instant::now());
+            }
+        }
+        state.engine.set_observing(checking);
         let before = state.engine.current_word().to_string();
         let keys = state.engine.current_keys().to_string();
         let context = state.engine.context().map(str::to_string);
