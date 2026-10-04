@@ -95,7 +95,7 @@ impl Default for Tuning {
             known_syllable: 6.9,
             rare_typed_penalty: 0.5,
             floor: 5.5,
-            margin: 2.0,
+            margin: 3.5,
             ambiguity: 1.0,
             far_floor: 5.5,
             far_ambiguity: 1.0,
@@ -120,7 +120,7 @@ impl Tuning {
             0 => Self {
                 known_word: 4.5,
                 known_syllable: 6.0,
-                margin: 3.0,
+                margin: 5.5,
                 floor: 6.5,
                 far_floor: 7.5,
                 restore_margin: 8.0,
@@ -129,7 +129,7 @@ impl Tuning {
             2 => Self {
                 known_word: 6.9,
                 known_syllable: 7.5,
-                margin: 1.0,
+                margin: 1.5,
                 floor: 4.5,
                 far_floor: 5.0,
                 restore_margin: 5.0,
