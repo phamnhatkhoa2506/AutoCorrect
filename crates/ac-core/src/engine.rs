@@ -576,7 +576,11 @@ impl<C: Corrector> Engine<C> {
             // The app deleted the last character on screen; find keys that
             // type what is left ("việt" -> "việ" = "vieej").
             let shown = std::mem::take(&mut self.word.shown);
-            self.word = if self.word.literal {
+            self.word = if shown.is_empty() {
+                // Nothing left of the word: a literal one must not keep the next
+                // word from being composed (Backspace never ends a word).
+                Word::default()
+            } else if self.word.literal {
                 Word { keys: shown.clone(), shown, literal: true }
             } else {
                 self.word_showing(&shown)
@@ -588,6 +592,7 @@ impl<C: Corrector> Engine<C> {
         self.context = None; // the word before the resumed one is unknown
         self.earlier.clear();
         self.pending = None;
+        self.word = Word::default();
         match self.prev_word.take() {
             Some(prev) => {
                 self.committed = self.committed.saturating_sub(prev.shown.chars().count() + 1);
@@ -1105,6 +1110,19 @@ mod tests {
         assert_eq!(e.current_word(), "tes");
         assert_eq!(press(&mut e, "s"), [Action::Pass]); // no tone this time
         assert_eq!(e.current_word(), "tess");
+    }
+
+    #[test]
+    fn a_word_erased_by_backspace_does_not_stay_literal() {
+        let mut e = vn_engine();
+        press(&mut e, "tesst");
+        for _ in 0..4 {
+            e.on_key(Key::Backspace);
+        }
+        e.on_key(Key::Backspace); // the last character
+        e.on_key(Key::Backspace); // more than was typed
+        press(&mut e, "toongr");
+        assert_eq!(e.current_word(), "tổng");
     }
 
     #[test]
