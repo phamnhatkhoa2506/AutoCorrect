@@ -232,6 +232,8 @@
               <small>Tắt đi thì chỉ còn gõ Telex.</small></span></label>
           <label><input type="checkbox" bind:checked={options.restore_marks} onchange={saveOptions} />
             <span>Tự thêm dấu khi gõ không dấu <small>khong → không</small></span></label>
+          <label><input type="checkbox" bind:checked={options.delayed} onchange={saveOptions} />
+            <span>Sửa muộn khi đã gõ từ kế tiếp <small>Thử nghiệm: "that là" → "thật là". Sửa lại từ ngay trước khi đã có từ sau; Ctrl+Z hoàn tác cả hai từ. Mặc định tắt.</small></span></label>
           <label><input type="checkbox" bind:checked={options.code_english} onchange={saveOptions} />
             <span>Sửa lỗi tiếng Anh cả trong IDE / terminal
               <small>Hữu ích cho khung chat của IDE; có thể đụng tới lệnh và mã.</small></span></label>

@@ -54,6 +54,7 @@ impl State {
             ac_config::InputMethod::Telex => ac_telex::Method::Telex,
             ac_config::InputMethod::Vni => ac_telex::Method::Vni,
         });
+        self.engine.set_delayed(s.delayed && self.app == AppKind::Normal);
         self.engine.set_vietnamese(s.vietnamese);
         // English corrections would mangle commands and code, unless the user
         // asked for them there (chat panels of an IDE are plain text).
@@ -325,6 +326,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let keys = state.engine.current_keys().to_string();
         let context = state.engine.context().map(str::to_string);
         let pending = state.engine.last_correction().map(|(k, f)| (k.to_string(), f.to_string()));
+        let late_before = state.engine.last_was_revision();
         let history = state.engine.history();
         let action = state.engine.on_key(key);
         let guard = state.guard && state.settings.autocomplete_guard;
@@ -356,8 +358,11 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         }
         if state.settings.journal && matches!(action, Action::Replace { .. } | Action::ReplaceThenPass { .. }) {
             let entry = match key {
-                Key::Space | Key::Punct(_) => state.engine.last_correction().map(|(k, f)| ("FIX", k.to_string(), f.to_string())),
-                Key::Undo => pending.map(|(k, f)| ("UNDO", k, f)),
+                Key::Space | Key::Punct(_) => {
+                    let kind = if state.engine.last_was_revision() { "LATE" } else { "FIX" };
+                    state.engine.last_correction().map(|(k, f)| (kind, k.to_string(), f.to_string()))
+                }
+                Key::Undo => pending.map(|(k, f)| (if late_before { "UNDO-LATE" } else { "UNDO" }, k, f)),
                 _ => None,
             };
             if let Some((kind, keys, fix)) = entry {

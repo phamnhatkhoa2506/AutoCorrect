@@ -48,6 +48,7 @@ const ID_EXIT: usize = 9;
 const ID_SETTINGS: usize = 11;
 const ID_EDITS: usize = 12;
 const ID_HARD: usize = 13;
+const ID_DELAYED: usize = 14;
 
 thread_local! {
     static WINDOW: Cell<HWND> = Cell::new(HWND::default());
@@ -154,6 +155,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             ID_JOURNAL => hook::update(|s| s.journal = !s.journal),
             ID_EDITS => hook::update(|s| s.journal_edits = !s.journal_edits),
             ID_HARD => hook::update(|s| s.journal_hard = !s.journal_hard),
+            ID_DELAYED => hook::update(|s| s.delayed = !s.delayed),
             ID_CODE_ENGLISH => hook::update(|s| s.code_english = !s.code_english),
             ID_GUARD => hook::update(|s| s.autocomplete_guard = !s.autocomplete_guard),
             ID_RESTORE => hook::update(|s| s.restore_marks = !s.restore_marks),
@@ -176,13 +178,14 @@ unsafe fn show_menu(hwnd: HWND) {
     let Ok(menu) = CreatePopupMenu() else { return };
     let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
     let vietnamese = HSTRING::from(format!("Tiếng Việt (Telex)\t{}", s.hotkey));
-    let items: [(usize, PCWSTR, bool); 10] = [
+    let items: [(usize, PCWSTR, bool); 11] = [
         (ID_VIETNAMESE, PCWSTR(vietnamese.as_ptr()), s.vietnamese),
         (ID_CORRECTIONS, w!("Tự sửa lỗi gõ"), s.corrections),
         (ID_PAUSED, w!("Tạm dừng"), s.paused),
         (ID_AUTOSTART, w!("Khởi động cùng Windows"), settings::autostart()),
         (ID_CODE_ENGLISH, w!("Sửa lỗi tiếng Anh cả trong IDE/terminal"), s.code_english),
         (ID_RESTORE, w!("Tự thêm dấu khi gõ không dấu (khong → không)"), s.restore_marks),
+        (ID_DELAYED, w!("Sửa muộn khi đã gõ từ kế tiếp (thử nghiệm)"), s.delayed),
         (ID_GUARD, w!("Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm"), s.autocomplete_guard),
         (ID_JOURNAL, w!("Ghi nhật ký sửa lỗi (để tinh chỉnh)"), s.journal),
         (ID_EDITS, w!("Ghi chữ bạn tự sửa tay (để học)"), s.journal_edits),

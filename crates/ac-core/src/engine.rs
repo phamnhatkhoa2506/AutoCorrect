@@ -60,6 +60,19 @@ struct LastCorrection {
     /// A Backspace deleted that delimiter (the word is being resumed), so
     /// the screen shows the fix alone.
     delimiter_removed: bool,
+    /// The fix of the first (or only) word.
+    first_fix: String,
+    /// A delayed revision changed this word and the one typed after it: `original` and
+    /// `corrected` then hold both words ("that là" -> "thật là"), and this is the
+    /// second word as typed.
+    second: Option<Word>,
+}
+
+/// A word finished with a space and left alone, which the next word may revise.
+struct Pending {
+    word: Word,
+    /// The words before it, oldest first.
+    history: Vec<String>,
 }
 
 /// Number of single-character edits between two words.
@@ -147,6 +160,9 @@ pub struct Engine<C: Corrector> {
     /// Shown text of a finished word the user went back into (Backspace over
     /// the space), until that word is finished again.
     resumed: Option<String>,
+    /// Revise a word once the next one is typed (off unless asked).
+    delayed: bool,
+    pending: Option<Pending>,
     /// A word finished differently from how it was before the user went back
     /// into it: (before, after). Taken by the platform layer for the journal.
     manual_edit: Option<(String, String)>,
@@ -178,6 +194,8 @@ impl<C: Corrector> Engine<C> {
             observing: false,
             learned: None,
             resumed: None,
+            delayed: false,
+            pending: None,
             manual_edit: None,
             last: None,
             just_undone: None,
@@ -253,6 +271,19 @@ impl<C: Corrector> Engine<C> {
 
     /// The word the user has just undone for the second time, once: to be
     /// remembered for good (the engine itself ignores it for the session).
+    /// Revise a word once the next one is typed, when the corrector has a better reading.
+    pub fn set_delayed(&mut self, on: bool) {
+        self.delayed = on;
+        if !on {
+            self.pending = None;
+        }
+    }
+
+    /// The last correction was a delayed revision of the word before the last one.
+    pub fn last_was_revision(&self) -> bool {
+        self.last.as_ref().is_some_and(|l| l.second.is_some())
+    }
+
     /// A word the user went back into and changed by hand: (before, after).
     pub fn take_manual_edit(&mut self) -> Option<(String, String)> {
         self.manual_edit.take()
@@ -274,7 +305,7 @@ impl<C: Corrector> Engine<C> {
 
     /// The correction a Backspace would undo right now: (keys typed, fix).
     pub fn last_correction(&self) -> Option<(&str, &str)> {
-        self.last.as_ref().map(|l| (l.original.keys.as_str(), l.corrected.as_str()))
+        self.last.as_ref().map(|l| (l.original.keys.as_str(), l.first_fix.as_str()))
     }
 
     pub fn on_key(&mut self, key: Key) -> Action {
@@ -316,6 +347,7 @@ impl<C: Corrector> Engine<C> {
         self.last = None;
         self.just_undone = None;
         self.resumed = None;
+        self.pending = None;
     }
 
     /// Why the last Space did or did not correct the word (for diagnostics).
@@ -357,6 +389,7 @@ impl<C: Corrector> Engine<C> {
         let punct = delimiter != ' ';
         let word = std::mem::take(&mut self.word);
         self.last = None;
+        let pending = self.pending.take();
         if let Some(original) = self.resumed.take() {
             // A word the user went back into and finished differently: a fix
             // made by hand (only small edits; rewriting a word says nothing).
@@ -380,6 +413,7 @@ impl<C: Corrector> Engine<C> {
             self.earlier = remember(&earlier, context.as_deref());
         }
 
+        let mut immediate: Option<String> = None;
         self.decision = if word.keys.is_empty() {
             Decision::EmptyWord
         } else if !self.corrections_on() || self.observing {
@@ -395,24 +429,92 @@ impl<C: Corrector> Engine<C> {
             let history: Vec<&str> = earlier.iter().map(String::as_str).chain(context.as_deref()).collect();
             match self.corrector.correct_in(&keys, &history) {
                 Some(fix) if fix != word.shown => {
-                    let action = if punct {
-                        match replace(&word.shown, &fix) {
-                            Action::Replace { backspaces, text } => Action::ReplaceThenPass { backspaces, text },
-                            other => other,
-                        }
-                    } else {
-                        replace(&word.shown, &format!("{fix} "))
-                    };
-                    self.committed = self.committed + fix.chars().count() - shown_len;
-                    self.prev_word = Some(self.word_showing(&fix));
-                    self.context = (!punct).then(|| fix.clone());
-                    self.last = Some(LastCorrection { original: word, corrected: fix, context, earlier, delimiter, delimiter_removed: false });
-                    self.decision = Decision::Corrected;
-                    return action;
+                    immediate = Some(fix);
+                    Decision::Corrected
                 }
                 _ => Decision::NoCandidate,
             }
         };
+        let final_shown = immediate.clone().unwrap_or_else(|| word.shown.clone());
+
+        // Delayed revision: the word before, left alone when it was typed, looked at
+        // again now that the word after it is known.
+        let revision = pending.and_then(|p| {
+            let usable = self.delayed && !untracked && !word.keys.is_empty() && !self.observing && self.corrections_on();
+            let undone = self.undos.get(&p.word.keys.to_lowercase()).copied().unwrap_or(0);
+            if !usable || undone >= IGNORE_AFTER_UNDOS {
+                return None;
+            }
+            let keys = self.method.telex_keys(&p.word.keys);
+            let history: Vec<&str> = p.history.iter().map(String::as_str).collect();
+            let fix = self.corrector.revise(&keys, &history, &[final_shown.clone()])?;
+            (fix != p.word.shown).then_some((p, fix))
+        });
+        if let Some((p, fix)) = revision {
+            // Both words are rewritten in one edit; Ctrl+Z restores both.
+            let old = format!("{} {}", p.word.shown, word.shown);
+            let new = format!("{fix} {final_shown}");
+            let action = if punct {
+                match replace(&old, &new) {
+                    Action::Replace { backspaces, text } => Action::ReplaceThenPass { backspaces, text },
+                    other => other,
+                }
+            } else {
+                replace(&old, &format!("{new} "))
+            };
+            self.committed = (self.committed + new.chars().count()).saturating_sub(old.chars().count());
+            self.prev_word = Some(self.word_showing(&final_shown));
+            self.context = (!punct).then(|| final_shown.clone());
+            if self.context.is_some() {
+                self.earlier = remember(&earlier, context.as_deref());
+                if let Some(last_word) = self.earlier.last_mut() {
+                    *last_word = fix.clone();
+                }
+            }
+            let second = Word { keys: word.keys.clone(), shown: word.shown.clone(), literal: word.literal };
+            self.last = Some(LastCorrection {
+                original: Word { keys: p.word.keys.clone(), shown: old, literal: false },
+                corrected: new,
+                context: Some(p.word.shown.clone()),
+                earlier: p.history.clone(),
+                delimiter,
+                delimiter_removed: false,
+                first_fix: fix,
+                second: Some(second),
+            });
+            self.decision = Decision::Corrected;
+            return action;
+        }
+
+        if let Some(fix) = immediate {
+            let action = if punct {
+                match replace(&word.shown, &fix) {
+                    Action::Replace { backspaces, text } => Action::ReplaceThenPass { backspaces, text },
+                    other => other,
+                }
+            } else {
+                replace(&word.shown, &format!("{fix} "))
+            };
+            self.committed = self.committed + fix.chars().count() - shown_len;
+            self.prev_word = Some(self.word_showing(&fix));
+            self.context = (!punct).then(|| fix.clone());
+            self.last = Some(LastCorrection {
+                original: word,
+                corrected: fix.clone(),
+                context,
+                earlier,
+                delimiter,
+                delimiter_removed: false,
+                first_fix: fix,
+                second: None,
+            });
+            return action;
+        }
+        // Left alone: remember it, so that the next word can revise it.
+        if self.decision == Decision::NoCandidate && !punct {
+            let history = earlier.iter().cloned().chain(context.clone()).collect();
+            self.pending = Some(Pending { word, history });
+        }
         Action::Pass
     }
 
@@ -421,10 +523,13 @@ impl<C: Corrector> Engine<C> {
     /// correction pending it is the program's own undo: the text changes
     /// out of our sight, so everything is forgotten and the key passes.
     fn on_undo(&mut self) -> Action {
+        self.pending = None;
         let Some(last) = self.last.take() else {
             self.clear();
             return Action::Pass;
         };
+        // After a delayed revision the word to resume is the second one.
+        let resumed_word = last.second.clone().unwrap_or_else(|| last.original.clone());
         let undone = self.undos.entry(last.original.keys.to_lowercase()).or_default();
         *undone += 1;
         if *undone == IGNORE_AFTER_UNDOS {
@@ -436,7 +541,7 @@ impl<C: Corrector> Engine<C> {
         if last.delimiter_removed {
             // The fixed word is on screen, resumed, with no delimiter.
             let action = replace(&last.corrected, &last.original.shown);
-            self.word = last.original;
+            self.word = resumed_word;
             self.prev_word = None;
             return action;
         }
@@ -445,9 +550,9 @@ impl<C: Corrector> Engine<C> {
         let action = replace(&format!("{}{d}", last.corrected), &format!("{}{d}", last.original.shown));
         self.committed = (self.committed + original).saturating_sub(fixed);
         // The delimiter stays; a Backspace over it resumes the original word.
-        self.context = (d == ' ').then(|| last.original.shown.clone());
+        self.context = (d == ' ').then(|| resumed_word.shown.clone());
         self.earlier = if d == ' ' { remember(&last.earlier, last.context.as_deref()) } else { Vec::new() };
-        self.prev_word = Some(last.original);
+        self.prev_word = Some(resumed_word);
         action
     }
 
@@ -475,6 +580,7 @@ impl<C: Corrector> Engine<C> {
         // it, otherwise we are now editing text we never saw.
         self.context = None; // the word before the resumed one is unknown
         self.earlier.clear();
+        self.pending = None;
         match self.prev_word.take() {
             Some(prev) => {
                 self.committed = self.committed.saturating_sub(prev.shown.chars().count() + 1);
@@ -825,6 +931,92 @@ mod tests {
         e.on_key(Key::Space);
         type_str(&mut e, "thr");
         assert_eq!(e.history(), ["one", "two"]);
+    }
+
+    /// A corrector that knows one delayed revision only: "that" before "la" is "thật".
+    struct Revising;
+
+    impl Corrector for Revising {
+        fn correct(&self, _word: &str) -> Option<String> {
+            None
+        }
+
+        fn revise(&self, word: &str, _history: &[&str], right: &[String]) -> Option<String> {
+            (word == "that" && right == ["la".to_string()]).then(|| "thật".to_string())
+        }
+    }
+
+    fn typed(e: &mut Engine<Revising>, text: &str) {
+        for c in text.chars() {
+            e.on_key(if c == ' ' { Key::Space } else { Key::Char(c) });
+        }
+    }
+
+    fn revising() -> Engine<Revising> {
+        let mut e = Engine::new(Revising);
+        e.set_delayed(true);
+        e
+    }
+
+    #[test]
+    fn the_next_word_revises_the_one_before() {
+        let mut e = revising();
+        typed(&mut e, "that ");
+        typed(&mut e, "la");
+        // Both words are rewritten in one edit, keeping the common start "th".
+        assert_eq!(e.on_key(Key::Space), Action::Replace { backspaces: 5, text: "ật la ".into() });
+        assert!(e.last_was_revision());
+        assert_eq!(e.last_correction(), Some(("that", "thật")));
+        assert_eq!(e.history(), ["thật", "la"]);
+    }
+
+    #[test]
+    fn ctrl_z_restores_both_words_and_resumes_the_second() {
+        let mut e = revising();
+        typed(&mut e, "that la");
+        e.on_key(Key::Space);
+        assert_eq!(e.on_key(Key::Undo), Action::Replace { backspaces: 6, text: "at la ".into() });
+        // The caret is after "that la ": Backspace over the space resumes "la", not both words.
+        e.on_key(Key::Backspace);
+        assert_eq!(e.current_word(), "la");
+    }
+
+    #[test]
+    fn revising_is_off_unless_asked_and_needs_a_known_neighbour() {
+        let mut e = Engine::new(Revising);
+        typed(&mut e, "that la");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
+        let mut e = revising();
+        typed(&mut e, "that ");
+        e.on_key(Key::Reset); // the caret may have moved: the word before is no longer sure
+        typed(&mut e, "la");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
+        let mut e = revising();
+        typed(&mut e, "that ");
+        e.on_key(Key::Backspace); // went back into "that": nothing is pending
+        typed(&mut e, " la");
+        assert_eq!(e.on_key(Key::Space), Action::Replace { backspaces: 5, text: "ật la ".into() });
+    }
+
+    #[test]
+    fn punctuation_after_the_second_word_also_revises() {
+        let mut e = revising();
+        typed(&mut e, "that la");
+        assert_eq!(e.on_key(Key::Punct(',')), Action::ReplaceThenPass { backspaces: 5, text: "ật la".into() });
+    }
+
+    #[test]
+    fn two_undone_revisions_stop_revising_that_word() {
+        let mut e = revising();
+        for _ in 0..2 {
+            typed(&mut e, "that la");
+            e.on_key(Key::Space);
+            e.on_key(Key::Undo);
+            e.on_key(Key::Reset);
+        }
+        typed(&mut e, "that la");
+        assert_eq!(e.on_key(Key::Space), Action::Pass);
+        assert_eq!(e.take_learned().as_deref(), Some("that"));
     }
 
     // ---- Vietnamese (Telex) mode ----

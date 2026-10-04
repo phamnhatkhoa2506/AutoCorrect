@@ -17,6 +17,12 @@ pub trait Corrector {
         self.correct_after(word, history.last().copied())
     }
 
+    /// A word left alone when it was typed, looked at again once the word after it
+    /// is known (`right`): a better reading of it, or `None`.
+    fn revise(&self, _word: &str, _history: &[&str], _right: &[String]) -> Option<String> {
+        None
+    }
+
     /// Which languages corrections may produce (input mode, per-app policy).
     fn set_languages(&mut self, _vietnamese: bool, _english: bool) {}
 

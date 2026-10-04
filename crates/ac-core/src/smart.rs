@@ -743,6 +743,10 @@ impl Corrector for SmartCorrector {
         self.correct_in(word, prev.as_slice())
     }
 
+    fn revise(&self, word: &str, history: &[&str], right: &[String]) -> Option<String> {
+        SmartCorrector::revise(self, word, history, right)
+    }
+
     fn correct_in(&self, word: &str, history: &[&str]) -> Option<String> {
         // The user's own dictionary comes first, for words of any length.
         let lower = word.to_lowercase();
@@ -943,6 +947,27 @@ mod tests {
         // Not in Vietnamese mode: no revision.
         c.set_languages(false, true);
         assert_eq!(c.revise("that", &[], &words("là")), None);
+    }
+
+    /// The engine with the real corrector, typing Telex: the next word revises the one before.
+    #[test]
+    fn engine_revises_with_the_real_corrector() {
+        use crate::{Action, Engine, Key};
+        let run = |text: &str| -> Vec<Action> {
+            let mut e = Engine::new(corrector());
+            e.set_vietnamese(true);
+            e.set_delayed(true);
+            text.chars().map(|c| e.on_key(if c == ' ' { Key::Space } else { Key::Char(c) })).collect()
+        };
+        // "that laf " -> "thật là ": the last Space rewrites both words.
+        let actions = run("that laf ");
+        match actions.last() {
+            Some(Action::Replace { text, .. }) => assert!(text.ends_with("ật là "), "{text:?}"),
+            other => panic!("expected a revision, got {other:?}"),
+        }
+        // Without the second word there is nothing to revise.
+        assert!(run("that ").iter().all(|a| matches!(a, Action::Pass | Action::Replace { .. })));
+        assert_eq!(run("that ").last(), Some(&Action::Pass));
     }
 
     /// The hard-case journal: a word left alone with two close readings is
