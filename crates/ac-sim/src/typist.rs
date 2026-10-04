@@ -121,10 +121,13 @@ pub enum Slip {
     MarkHalf,
     /// Shift held a key too long: "ĐIểm".
     CapsHeld,
+    /// The spaces between a run of words left out: "quanheej" for "quan hệ". Made by
+    /// the simulation on several words at once ([`Profile::join`]), not by [`Profile::slip`].
+    SpaceMissing,
 }
 
 impl Slip {
-    pub const ALL: [Slip; 9] = [
+    pub const ALL: [Slip; 10] = [
         Slip::Neighbour,
         Slip::Omit,
         Slip::Double,
@@ -134,6 +137,7 @@ impl Slip {
         Slip::ToneMissing,
         Slip::MarkHalf,
         Slip::CapsHeld,
+        Slip::SpaceMissing,
     ];
 
     pub fn name(self) -> &'static str {
@@ -147,6 +151,7 @@ impl Slip {
             Slip::ToneMissing => "tone-missing",
             Slip::MarkHalf => "mark-half",
             Slip::CapsHeld => "caps-held",
+            Slip::SpaceMissing => "space-missing",
         }
     }
 
@@ -244,6 +249,11 @@ pub struct Profile {
     pub undo: f64,
     /// Chance that a word stands in brackets or quotes, right against it: "(vì)".
     pub wrap: f64,
+    /// Chance, per sentence, that the space between two Vietnamese words is left
+    /// out ("quanheej" for "quan hệ"); at most once per sentence.
+    pub join: f64,
+    /// The longest run of words typed without spaces.
+    pub join_max: usize,
 }
 
 impl Default for Profile {
@@ -265,6 +275,8 @@ impl Default for Profile {
             notice: 0.3,
             undo: 0.7,
             wrap: 0.02,
+            join: 0.15,
+            join_max: 5,
         }
     }
 }

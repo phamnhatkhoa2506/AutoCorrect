@@ -32,6 +32,7 @@ Giải pháp có thể: ...
 | 14 | Chữ viết tắt in hoa và tên riêng bị đổi nhầm (`CPI` → `COI`, `Xavi` → `Xạ`) | Mở |
 | 15 | Tiếng Anh gõ ở chế độ Việt không bao giờ được sửa lại (`of` → `ò`) | Mở |
 | 16 | Sửa muộn đổi `that` trong câu tiếng Anh thành `thật` | Mở |
+| 17 | Thiếu dấu cách giữa hai hoặc nhiều từ không được sửa (`quanheej` → `quan hệ`) | Mở |
 
 ---
 
@@ -239,3 +240,17 @@ Trạng thái: Mở | Nguồn: sim `ac-sim`, 2026-10-04 | Liên quan: #4
 **Giải pháp có thể:**
 - Không đổi sang tiếng Việt khi cả từ trước lẫn từ sau là tiếng Anh.
 - Về lâu dài: cùng bài toán nhận diện ngôn ngữ theo ngữ cảnh như #15.
+
+---
+
+## #17. Thiếu dấu cách giữa hai hoặc nhiều từ không được sửa
+Trạng thái: Mở | Nguồn: bạn đề xuất, 2026-10-04; đo bằng sim `ac-sim` (`--join`) | Liên quan: RESEARCH.md yêu cầu #6
+
+**Mô tả:** Gõ `quanheej` (quên Space giữa `quan` và `hệ`) thì app không sửa thành `quan hệ`. Thực tế có thể dính 3, 4 hoặc nhiều từ. Trong sim: 0 ca được sửa ở mọi độ dài từ 2 đến 5 từ (bảng theo độ dài do `ac-sim` in). Màn hình giữ chữ thô (`giastreen` cho "giá trên", `ddungscachs` cho "đúng cách") vì Telex không ghép được cả chuỗi; vài ca còn bị sửa sai làm mất chữ (`toanfan` → `toàn`, `Xarcos` → `Xác`).
+
+**Giải pháp có thể:**
+- Sinh ứng viên tách k âm tiết: quy hoạch động theo vị trí cắt, mỗi đoạn phải là âm tiết hợp lệ, giữ lại vài cách tách tốt nhất (như tách từ). Không liệt kê hết nên chi phí vẫn nhỏ. Mơ hồ ở ranh giới (`an|h` hay `a|nh`, `ng` hay `n|g`) cần ngữ cảnh.
+- Lỗi gõ nằm bên trong một chuỗi dính (`quanhejf` thừa phím) trộn bài toán tách với bài toán sửa chính tả: điểm cặp từ và ngữ cảnh mới đủ phân biệt.
+- Chọn cách tách và quyết định có sửa hay không: điểm cặp từ (KN) + ngữ cảnh làm mốc ban đầu; về sau để mô hình học (cùng khung với các yêu cầu khác).
+- Engine: một lần sửa thay một từ bằng k từ, ghép Telex từng đoạn sau khi tách (ghép cả chuỗi dài một lần sẽ sai ở các âm tiết sau); ngữ cảnh cho từ sau là từ cuối của đoạn; Ctrl+Z trả lại chuỗi phím nguyên.
+- Chặn ngay: không để bộ sửa hiện tại "sửa" chuỗi dính thành một từ làm mất chữ (`toanfan` → `toàn`).

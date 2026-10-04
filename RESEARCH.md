@@ -13,7 +13,7 @@ từng ca.
 
 ### 1.1 Một quyết định chung
 
-Năm yêu cầu (mục 2) quy về cùng một quyết định, lặp lại ở mỗi ranh giới từ:
+Các yêu cầu (mục 2) quy về cùng một quyết định, lặp lại ở mỗi ranh giới từ:
 
 > Biết **các phím đã gõ** của từ, **ngữ cảnh trái**, **môi trường** (app, loại ô nhập) và, nếu đang
 > sửa muộn, **ngữ cảnh phải**: chọn **để nguyên**, **thay bằng ứng viên X**, hoặc **chờ thêm**.
@@ -31,7 +31,7 @@ Năm yêu cầu (mục 2) quy về cùng một quyết định, lặp lại ở 
 - Huấn luyện nặng chạy trên Kaggle hoặc máy GPU khác, không chạy trên máy người dùng.
 - Chuẩn hóa teencode chỉ là tùy chọn, mặc định tắt.
 
-## 2. Năm yêu cầu và cách xếp chúng
+## 2. Các yêu cầu và cách xếp chúng
 
 | # | Yêu cầu | Loại bài toán | Ghi chú |
 |---|---|---|---|
@@ -40,6 +40,7 @@ Năm yêu cầu (mục 2) quy về cùng một quyết định, lặp lại ở 
 | 3 | Sửa cả ngữ pháp, theo cả hai chế độ | Học: mô hình chuỗi (chèn, xóa, đổi từ) | Lớn hơn hẳn; làm sau. Phần giao là lỗi "từ hợp lệ nhưng sai" |
 | 4 | Chống nhiễu (`vò sao`, `vì saoi`) | Học: mô hình lỗi gõ + ngữ cảnh | `vò` là từ hợp lệ sinh từ lỗi kề phím: cần ngữ cảnh, giống #1 |
 | 5 | Dấu câu dính chữ (`saoi)`, `"vif"`) | **Không phải bài toán học**: cách engine tách từ | Đã sửa trong engine (mục 6) |
+| 6 | Thiếu dấu cách giữa k từ (`quanheej` → `quan hệ`, k ≥ 2 bất kỳ) | Tách chuỗi phím thành k âm tiết: sinh ứng viên bằng quy hoạch động theo chỗ cắt + **học** chọn cách tách theo ngữ cảnh, đồng thời với sửa lỗi gõ bên trong | Engine phải thay một từ bằng k từ (ngữ cảnh, hoàn tác); Telex ghép từng đoạn sau khi tách. Sim: app sửa 0% ở mọi k |
 
 ## 3. Môi trường mô phỏng (`crates/ac-sim`)
 
@@ -70,7 +71,9 @@ Chạy: `cargo run -p ac-sim --release -- --help`.
 Một lần sửa bị người gõ hoàn tác vẫn được chấm theo những gì app đã viết, không theo màn hình sau khi
 người gõ dọn lại: chỉ số đo quyết định của app.
 
-### 3.1 Kết quả đầu tiên (2026-10-04, mặc định: 300 câu mỗi kho, hạt giống 7, sửa muộn bật)
+### 3.1 Kết quả đầu tiên (2026-10-04: 300 câu mỗi kho, hạt giống 7, sửa muộn bật)
+
+Đo trước khi có lỗi thiếu dấu cách; chạy lại đúng bảng này bằng `--join 0`.
 
 Tỉ lệ lỗi gõ của người gõ là đoán, nên chỉ dùng để so phiên bản và so môi trường, không phải độ chính
 xác ngoài đời.
@@ -99,6 +102,10 @@ Theo loại lỗi (ba kho tiếng Việt gộp lại, môi trường normal → 
   từ hiếm hoặc từ láy (`rưng rưng` → `rung`), và sửa muộn đổi `that` trong câu tiếng Anh thành `thật`.
   Một phần là câu cố ý gõ không dấu trong kho (`sap` → `sắp`): tính năng thêm dấu làm đúng việc của nó.
 - **Lỗi thiếu phím và lỗi thanh** bị bỏ sót nhiều nhất (60–80%).
+- **Thiếu dấu cách giữa k từ** (thêm sau; `--join` là tỉ lệ câu có một đoạn dính, `--join-max` là k tối đa,
+  mặc định 5): app sửa 0% ở mọi k từ 2 đến 5 (lần đo 400 câu mỗi kho, `--join 0.5`: 2 từ 0 trên 326, 3 từ 0 trên
+  137, 4 từ 0 trên 85, 5 từ 0 trên 59, ở môi trường normal). Màn hình giữ chữ thô (`giastreen`); một phần
+  ca 2 từ bị sửa sai mất chữ (`toanfan` → `toàn`), tiếng Anh dính hai từ bị sửa sai nhiều nhất.
 
 ## 4. Dữ liệu thật: hiện có gì
 
@@ -127,6 +134,7 @@ tự sửa tay (Backspace vào từ rồi gõ lại), đã được engine bắt
 | R0 | Dấu đóng `) ] } "` kết thúc từ như dấu phẩy (yêu cầu #5) | Xong trong mã (sim xác nhận `saoi)` → `sao`), chờ thử thật |
 | R1 | Sim v1: người gõ, engine thật, màn hình, làn đối chứng, Ctrl+Z, xuất JSONL | Xong, kết quả ở mục 3.1 |
 | R2 | Hiệu chỉnh người gõ bằng lỗi thật (cần `journal_edits`) | Chờ dữ liệu |
+| R2b | Thiếu dấu cách (#6): tách k âm tiết (quy hoạch động), engine thay một từ bằng k từ, đo theo k bằng sim | Đề xuất |
 | R3 | Mô hình học cho yêu cầu #1 và #4 (lỗi từ hợp lệ theo ngữ cảnh, có để nguyên) | |
 | R4 | Thích nghi môi trường và học trực tuyến (#2) | |
 | R5 | Ngữ pháp (#3) | |

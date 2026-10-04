@@ -104,6 +104,43 @@ pub struct WordResult {
     pub outcome: Outcome,
 }
 
+impl WordResult {
+    /// A word as typed, before it is scored.
+    fn typed(intended: String, keys: String, slip: Option<Slip>, typist_fixed: bool) -> Self {
+        Self {
+            intended,
+            keys,
+            slip,
+            typist_fixed,
+            baseline: String::new(),
+            shown: String::new(),
+            app_wrote: None,
+            undone: false,
+            outcome: Outcome::Kept,
+        }
+    }
+}
+
+/// The screen text of each word meant, in order, or `None` if the screen no
+/// longer lines up with them. Several words typed without the spaces between
+/// them ("quan hệ" as "quanheej") are one word meant that covers one screen
+/// word, or as many as the app split it into; there is at most one such run per
+/// sentence, so the number of extra screen words tells how many.
+fn per_word(screen: &[String], words: &[WordResult]) -> Option<Vec<String>> {
+    let extra = screen.len().checked_sub(words.len())?;
+    if extra > 0 && !words.iter().any(|w| w.intended.contains(' ')) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(words.len());
+    let mut at = 0;
+    for w in words {
+        let take = if w.intended.contains(' ') { 1 + extra } else { 1 };
+        out.push(screen.get(at..at + take)?.join(" "));
+        at += take;
+    }
+    (at == screen.len()).then_some(out)
+}
+
 /// A sentence typed in full: its words, or why they could not be scored.
 pub enum Typed {
     Words(Vec<WordResult>),
@@ -148,6 +185,21 @@ impl Sim {
         }
     }
 
+    /// Where a run of 2 to `join_max` Vietnamese words typed without spaces starts, and
+    /// its length, if this sentence gets one.
+    fn pick_run(&mut self, plan: &[Token]) -> Option<(usize, usize)> {
+        if self.profile.join <= 0.0 || !self.rng.chance(self.profile.join) {
+            return None;
+        }
+        let vi = |i: usize| matches!(plan.get(i), Some(Token::Word { vietnamese: true, .. }));
+        // How many Vietnamese words follow each other, a single space apart, from `i`.
+        let reach = |i: usize| (0..).take_while(|n| vi(i + 2 * n) && (plan.get(i + 2 * n + 1) == Some(&Token::Space) || !vi(i + 2 * n + 2))).count();
+        let starts: Vec<(usize, usize)> =
+            (0..plan.len()).map(|i| (i, reach(i).min(self.profile.join_max))).filter(|&(_, k)| k >= 2).collect();
+        let (at, longest) = *starts.get(self.rng.below(starts.len().max(1)))?;
+        Some((at, 2 + self.rng.below(longest - 1)))
+    }
+
     /// A key to both lanes; what the app's engine did.
     fn press(&mut self, key: Key, typed: Option<char>) -> Action {
         self.plain.press(key, typed);
@@ -161,8 +213,29 @@ impl Sim {
         self.main.screen.clear();
         self.plain.screen.clear();
         let mut words: Vec<WordResult> = Vec::new();
-        for (i, token) in plan.iter().enumerate() {
-            match token {
+        // Now and then the spaces between a run of Vietnamese words are left out.
+        let join = self.pick_run(plan);
+        let mut i = 0;
+        while i < plan.len() {
+            if let Some((at, k)) = join {
+                if at == i {
+                    let run: Vec<(&String, &String)> = (0..k)
+                        .filter_map(|n| match &plan[i + 2 * n] {
+                            Token::Word { text, keys, .. } => Some((text, keys)),
+                            _ => None,
+                        })
+                        .collect();
+                    let typed: String = run.iter().map(|(_, keys)| keys.as_str()).collect();
+                    for c in typed.chars() {
+                        self.press(Key::Char(c), Some(c));
+                    }
+                    let meant = run.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
+                    words.push(WordResult::typed(meant, typed, Some(Slip::SpaceMissing), false));
+                    i += 2 * k - 1;
+                    continue;
+                }
+            }
+            match &plan[i] {
                 Token::Word { text, keys, vietnamese } => {
                     // Now and then a word in brackets or quotes, right against it.
                     let alone = (i == 0 || plan[i - 1] == Token::Space) && plan.get(i + 1).is_none_or(|t| *t == Token::Space);
@@ -178,17 +251,7 @@ impl Sim {
                         self.press(Key::Char(c), Some(c));
                     }
                     let typist_fixed = slip.is_some() && self.rng.chance(self.profile.notice) && self.retype(text, keys);
-                    words.push(WordResult {
-                        intended: text.clone(),
-                        keys: typed,
-                        slip: slip.map(|(kind, _)| kind),
-                        typist_fixed,
-                        baseline: String::new(),
-                        shown: String::new(),
-                        app_wrote: None,
-                        undone: false,
-                        outcome: Outcome::Kept,
-                    });
+                    words.push(WordResult::typed(text.clone(), typed, slip.map(|(kind, _)| kind), typist_fixed));
                     if let Some((_, close)) = wrap {
                         self.boundary(mark_key(close), Some(close), &mut words);
                     }
@@ -201,12 +264,13 @@ impl Sim {
                     }
                 },
             }
+            i += 1;
         }
-        let shown = self.main.screen.words();
-        let baseline = self.plain.screen.words();
-        if shown.len() != words.len() || baseline.len() != words.len() {
+        let (Some(shown), Some(baseline)) =
+            (per_word(&self.main.screen.words(), &words), per_word(&self.plain.screen.words(), &words))
+        else {
             return Typed::Misaligned;
-        }
+        };
         for ((w, shown), baseline) in words.iter_mut().zip(shown).zip(baseline) {
             let judged = if w.undone { w.app_wrote.clone().unwrap_or_else(|| shown.clone()) } else { shown.clone() };
             w.outcome = match (baseline == w.intended, is_meant(&judged, &w.intended, &baseline)) {
@@ -225,19 +289,18 @@ impl Sim {
     /// A key that ends a word, which may correct it or revise the one before.
     /// The typist looks at the words that changed and may press Ctrl+Z.
     fn boundary(&mut self, key: Key, typed: Option<char>, words: &mut [WordResult]) {
-        let before = self.main.screen.words();
+        let before = per_word(&self.main.screen.words(), words);
         if self.press(key, typed) == Action::Pass {
             return;
         }
-        let after = self.main.screen.words();
-        if before.len() != after.len() || after.len() != words.len() {
+        let (Some(before), Some(after)) = (before, per_word(&self.main.screen.words(), words)) else {
             return;
-        }
+        };
         let changed: Vec<usize> = (0..after.len()).filter(|&i| before[i] != after[i]).collect();
         for &i in &changed {
             words[i].app_wrote = Some(after[i].clone());
         }
-        let typed = self.plain.screen.words();
+        let typed = per_word(&self.plain.screen.words(), words).unwrap_or_default();
         let wrong =
             changed.iter().any(|&i| !is_meant(&after[i], &words[i].intended, typed.get(i).map_or("", String::as_str)));
         if wrong && self.rng.chance(self.profile.undo) {
@@ -294,6 +357,8 @@ pub struct Tally {
     /// Per slip kind (`None`: no slip, yet the word as typed was not the word
     /// meant: Telex changed it, as with English words typed in Vietnamese mode).
     pub by_slip: BTreeMap<Option<Slip>, BTreeMap<Outcome, u32>>,
+    /// Runs of words typed without spaces, by the number of words in the run.
+    pub by_run: BTreeMap<usize, BTreeMap<Outcome, u32>>,
     pub typist_fixed: u32,
     pub undone: u32,
 }
@@ -303,6 +368,10 @@ impl Tally {
         *self.outcomes.entry(w.outcome).or_default() += 1;
         // Only words still wrong when they were ended: one the typist fixed is not
         // the app's to fix.
+        if w.slip == Some(Slip::SpaceMissing) {
+            let k = w.intended.split(' ').count();
+            *self.by_run.entry(k).or_default().entry(w.outcome).or_default() += 1;
+        }
         if w.baseline != w.intended {
             *self.by_slip.entry(w.slip).or_default().entry(w.outcome).or_default() += 1;
         }
@@ -331,7 +400,7 @@ mod tests {
     }
 
     fn quiet() -> Profile {
-        Profile { rate: 0.0, wrap: 0.0, ..Profile::default() }
+        Profile { rate: 0.0, wrap: 0.0, join: 0.0, ..Profile::default() }
     }
 
     fn outcomes(typed: Typed) -> Vec<(String, Outcome)> {
@@ -352,5 +421,20 @@ mod tests {
         let mut plan = plan("vì sao)").unwrap();
         plan[2] = Token::Word { text: "sao".into(), keys: "saoi".into(), vietnamese: true };
         assert_eq!(outcomes(s.type_sentence(&plan))[1], ("sao".to_string(), Outcome::Fixed));
+    }
+
+    #[test]
+    fn two_words_typed_without_the_space_are_scored_as_one() {
+        let mut s = sim(Profile { join: 1.0, ..quiet() });
+        let plan = plan("mối quan hệ").unwrap();
+        // The run is at most `join_max` words long.
+        let mut short = sim(Profile { join: 1.0, join_max: 2, ..quiet() });
+        let Typed::Words(words) = short.type_sentence(&plan) else { panic!("misaligned") };
+        assert!(words.iter().all(|w| w.intended.split(' ').count() <= 2));
+        let Typed::Words(words) = s.type_sentence(&plan) else { panic!("misaligned") };
+        let joined: Vec<_> = words.iter().filter(|w| w.slip == Some(Slip::SpaceMissing)).collect();
+        assert_eq!(joined.len(), 1);
+        assert!(["mối quan", "quan hệ", "mối quan hệ"].contains(&joined[0].intended.as_str()));
+        assert!(words.len() <= 2);
     }
 }

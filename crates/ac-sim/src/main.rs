@@ -1,7 +1,7 @@
 //! Simulated typing (RESEARCH.md, section 3).
 //!
 //!     cargo run -p ac-sim --release -- [--sentences N] [--env normal|code|both] [--seed S]
-//!         [--rate R] [--notice P] [--undo P] [--wrap P]
+//!         [--rate R] [--notice P] [--undo P] [--wrap P] [--join P] [--join-max N]
 //!         [--strength 0|1|2] [--no-delayed] [--code-english]
 //!         [--show N] [--export out.jsonl]
 //!
@@ -69,7 +69,7 @@ fn main() {
     let show = flag("--show", 0.0) as usize;
     let d = Profile::default();
     let profile =
-        Profile { rate: flag("--rate", d.rate), notice: flag("--notice", d.notice), undo: flag("--undo", d.undo), wrap: flag("--wrap", d.wrap), ..d };
+        Profile { rate: flag("--rate", d.rate), notice: flag("--notice", d.notice), undo: flag("--undo", d.undo), wrap: flag("--wrap", d.wrap), join: flag("--join", d.join), join_max: flag("--join-max", d.join_max as f64) as usize, ..d };
     let settings = AppSettings {
         delayed: !has("--no-delayed"),
         code_english: has("--code-english"),
@@ -83,7 +83,10 @@ fn main() {
     };
     let mut export = value("--export").map(|p| BufWriter::new(fs::File::create(p).expect("export file")));
     println!("{settings:?}");
-    println!("typist: slip rate {}, sees own slip {}, Ctrl+Z on a wrong change {}, word in brackets/quotes {}", profile.rate, profile.notice, profile.undo, profile.wrap);
+    println!(
+        "typist: slip rate {}, sees own slip {}, Ctrl+Z on a wrong change {}, word in brackets/quotes {}, two words without the space {} (per sentence)",
+        profile.rate, profile.notice, profile.undo, profile.wrap, profile.join
+    );
 
     let raw = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/raw");
     let corpora: Vec<(&str, Vec<Vec<Token>>, u32)> = SETS
@@ -164,6 +167,19 @@ fn report(env: Env, set: &str, t: &Tally, examples: &[String]) {
             pct(c(Outcome::Missed), n),
             pct(c(Outcome::Wrong), n)
         );
+    }
+    if !t.by_run.is_empty() {
+        println!("    runs of words typed without spaces:   words  fixed  missed  wrong");
+        for (k, counts) in &t.by_run {
+            let n: u32 = counts.values().sum();
+            let c = |o: Outcome| counts.get(&o).copied().unwrap_or(0);
+            println!(
+                "      {k} words{n:>28}{:>6.1}%{:>6.1}%{:>6.1}%",
+                pct(c(Outcome::Fixed), n),
+                pct(c(Outcome::Missed), n),
+                pct(c(Outcome::Wrong), n)
+            );
+        }
     }
     println!(
         "  slips the typist fixed before ending the word: {}; words put back with Ctrl+Z (counted above as the app left them): {}",
