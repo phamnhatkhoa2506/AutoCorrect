@@ -390,7 +390,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             let telex = state.settings.input == ac_config::InputMethod::Telex;
             if state.settings.journal_hard
                 && telex
-                && matches!(key, Key::Space | Key::Punct(_))
+                && matches!(key, Key::Space | Key::Punct(_) | Key::Close(_))
                 && state.engine.last_decision() == Decision::NoCandidate
                 && !keys.is_empty()
             {
@@ -407,7 +407,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         }
         if state.settings.journal && matches!(action, Action::Replace { .. } | Action::ReplaceThenPass { .. }) {
             let entry = match key {
-                Key::Space | Key::Punct(_) => {
+                Key::Space | Key::Punct(_) | Key::Close(_) => {
                     let kind = if state.engine.last_was_revision() { "LATE" } else { "FIX" };
                     state.engine.last_correction().map(|(k, f)| (kind, k.to_string(), f.to_string()))
                 }
@@ -419,7 +419,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
                 log::journal(format!("{kind}\t{keys}\t{fix}\t{}\t{mode}\t{:?}", context.as_deref().unwrap_or(""), state.app));
             }
         }
-        if matches!(key, Key::Space | Key::Punct(_)) && log::debug_enabled() {
+        if matches!(key, Key::Space | Key::Punct(_) | Key::Close(_)) && log::debug_enabled() {
             let decision = state.engine.last_decision();
             let mut line = format!("  word on Space: {before:?} (keys {keys:?}, after {context:?}) -> {decision:?}");
             if decision == Decision::NoCandidate {
@@ -444,7 +444,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
     };
     let kind = match key {
         Key::Undo => JobKind::Undo,
-        Key::Space | Key::Punct(_) => JobKind::Fix,
+        Key::Space | Key::Punct(_) | Key::Close(_) => JobKind::Fix,
         _ => JobKind::Compose,
     };
     inject::run(Job {
@@ -526,6 +526,11 @@ unsafe fn decode(kb: &KBDLLHOOKSTRUCT) -> Option<Key> {
         VIRTUAL_KEY(0xBA) => Key::Punct(if shift { ':' } else { ';' }),
         VIRTUAL_KEY(0xBF) if shift => Key::Punct('?'),
         VIRTUAL_KEY(0x31) if shift => Key::Punct('!'),
+        // Closing brackets and the double quote: end a word typed right before
+        // them. Opening ones and the apostrophe ("don't") forget the text.
+        VIRTUAL_KEY(0x30) if shift => Key::Close(')'),
+        VIRTUAL_KEY(0xDD) => Key::Close(if shift { '}' } else { ']' }),
+        VIRTUAL_KEY(0xDE) if shift => Key::Close('"'),
         VIRTUAL_KEY(v @ 0x30..=0x39) if !shift => Key::Char(v as u8 as char),
         // Enter, Tab, punctuation, arrows, Home/End, Delete, F-keys...
         _ => Key::Reset,

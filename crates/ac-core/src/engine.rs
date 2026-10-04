@@ -15,6 +15,10 @@ pub enum Key {
     /// Punctuation that ends a word (, . ; : ! ?). The key itself still
     /// reaches the program, right after any correction.
     Punct(char),
+    /// A closing bracket or quote mark: ) ] } ". Right after a word it ends the
+    /// word like punctuation ("vì saoi)" is corrected); anywhere else it may
+    /// open something ("(vì") and the text is forgotten as with [`Key::Reset`].
+    Close(char),
     /// Ctrl+Z. Right after a correction it undoes that correction (and is
     /// swallowed); at any other time it is the program's own undo and passes.
     Undo,
@@ -335,6 +339,11 @@ impl<C: Corrector> Engine<C> {
             Key::Backspace => self.on_backspace(),
             Key::Space => self.on_boundary(' '),
             Key::Punct(c) => self.on_boundary(c),
+            Key::Close(c) if !self.word.keys.is_empty() => self.on_boundary(c),
+            Key::Close(_) => {
+                self.clear();
+                Action::Pass
+            }
             Key::Undo => self.on_undo(),
             Key::Reset => {
                 self.clear();
@@ -800,6 +809,25 @@ mod tests {
         type_str(&mut e, "the");
         assert_eq!(e.on_key(Key::Punct(',')), Action::Pass);
         assert_eq!(e.on_key(Key::Punct(',')), Action::Pass);
+    }
+
+    #[test]
+    fn closing_bracket_or_quote_ends_the_word_like_punctuation() {
+        let mut e = engine();
+        type_str(&mut e, "teh");
+        assert_eq!(
+            e.on_key(Key::Close(')')),
+            Action::ReplaceThenPass { backspaces: 2, text: "he".into() }
+        );
+        // Backspace over the bracket resumes the fixed word.
+        assert_eq!(e.on_key(Key::Backspace), Action::Pass);
+        assert_eq!(e.current_word(), "the");
+        // A quote mark with no word before it opens a quotation: the word after
+        // it is still corrected on Space.
+        e.on_key(Key::Space);
+        assert_eq!(e.on_key(Key::Close('"')), Action::Pass);
+        type_str(&mut e, "teh");
+        assert_eq!(e.on_key(Key::Close('"')), Action::ReplaceThenPass { backspaces: 2, text: "he".into() });
     }
 
     #[test]
