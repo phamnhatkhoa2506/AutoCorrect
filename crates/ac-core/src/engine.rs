@@ -447,7 +447,7 @@ impl<C: Corrector> Engine<C> {
             }
             let keys = self.method.telex_keys(&p.word.keys);
             let history: Vec<&str> = p.history.iter().map(String::as_str).collect();
-            let fix = self.corrector.revise(&keys, &history, &[final_shown.clone()])?;
+            let fix = self.corrector.revise(&keys, &history, std::slice::from_ref(&final_shown))?;
             (fix != p.word.shown).then_some((p, fix))
         });
         if let Some((p, fix)) = revision {
