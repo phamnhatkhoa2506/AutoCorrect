@@ -778,10 +778,11 @@ fn main() {
     println!("{tuning:?}");
 
     let started = Instant::now();
-    let sets: [(&str, Language, Vec<&str>); 3] = [
+    let sets: [(&str, Language, Vec<&str>); 4] = [
         ("Vietnamese", Language::Vietnamese, vec!["vie_news_2022_1M", "vie-vn_web_2015_1M"]),
         ("English", Language::English, vec!["eng_news_2023_1M"]),
         ("Vietnamese dialogue (subtitles)", Language::Vietnamese, vec!["vie_subtitles"]),
+        ("Vietnamese social (ViLexNorm)", Language::Vietnamese, vec!["vie_social"]),
     ];
     let mut alls: Vec<Vec<Word>> = sets
         .iter()
@@ -839,7 +840,7 @@ fn main() {
             .collect();
         if let Some(out) = export_out.as_mut() {
             corrector.set_context(true);
-            let set = if name == "English" { "en" } else if name.contains("dialogue") { "vd" } else { "vi" };
+            let set = if name == "English" { "en" } else if name.contains("dialogue") { "vd" } else if name.contains("social") { "vs" } else { "vi" };
             export(&corrector, &cases, set, language, out, &mut export_counts);
         }
         if name.starts_with("Vietnamese") && args.iter().any(|a| a == "--diagnose") {
