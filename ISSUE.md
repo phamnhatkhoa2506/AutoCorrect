@@ -32,7 +32,7 @@ Giải pháp có thể: ...
 | 14 | Chữ viết tắt in hoa và tên riêng bị đổi nhầm (`CPI` → `COI`, `Xavi` → `Xạ`) | Mở |
 | 15 | Tiếng Anh gõ ở chế độ Việt không bao giờ được sửa lại (`of` → `ò`) | Mở |
 | 16 | Sửa muộn đổi `that` trong câu tiếng Anh thành `thật` | Mở |
-| 17 | Thiếu dấu cách giữa hai hoặc nhiều từ không được sửa (`quanheej` → `quan hệ`) | Mở |
+| 17 | Thiếu dấu cách giữa hai hoặc nhiều từ (`quanheej` → `quan hệ`) | Đang sửa (bản đầu có, sửa đúng 53% với 2 từ) |
 
 ---
 
@@ -243,8 +243,8 @@ Trạng thái: Mở | Nguồn: sim `ac-sim`, 2026-10-04 | Liên quan: #4
 
 ---
 
-## #17. Thiếu dấu cách giữa hai hoặc nhiều từ không được sửa
-Trạng thái: Mở | Nguồn: bạn đề xuất, 2026-10-04; đo bằng sim `ac-sim` (`--join`) | Liên quan: RESEARCH.md yêu cầu #6
+## #17. Thiếu dấu cách giữa hai hoặc nhiều từ
+Trạng thái: Đang sửa | Nguồn: bạn đề xuất, 2026-10-04; đo bằng sim `ac-sim` (`--join`) | Liên quan: RESEARCH.md yêu cầu #6
 
 **Mô tả:** Gõ `quanheej` (quên Space giữa `quan` và `hệ`) thì app không sửa thành `quan hệ`. Thực tế có thể dính 3, 4 hoặc nhiều từ. Trong sim: 0 ca được sửa ở mọi độ dài từ 2 đến 5 từ (bảng theo độ dài do `ac-sim` in). Màn hình giữ chữ thô (`giastreen` cho "giá trên", `ddungscachs` cho "đúng cách") vì Telex không ghép được cả chuỗi; vài ca còn bị sửa sai làm mất chữ (`toanfan` → `toàn`, `Xarcos` → `Xác`).
 
@@ -254,3 +254,5 @@ Trạng thái: Mở | Nguồn: bạn đề xuất, 2026-10-04; đo bằng sim `a
 - Chọn cách tách và quyết định có sửa hay không: điểm cặp từ (KN) + ngữ cảnh làm mốc ban đầu; về sau để mô hình học (cùng khung với các yêu cầu khác).
 - Engine: một lần sửa thay một từ bằng k từ, ghép Telex từng đoạn sau khi tách (ghép cả chuỗi dài một lần sẽ sai ở các âm tiết sau); ngữ cảnh cho từ sau là từ cuối của đoạn; Ctrl+Z trả lại chuỗi phím nguyên.
 - Chặn ngay: không để bộ sửa hiện tại "sửa" chuỗi dính thành một từ làm mất chữ (`toanfan` → `toàn`).
+
+**Cập nhật (2026-10-04): bản đầu của bộ tách (`smart/split.rs`).** Sửa đúng 53% với 2 từ dính, 41% với 3, 20% với 4, 12% với 5 (trước đó 0%). Giữ ngưỡng chặt nên chưa tìm được hết; chi tiết và đánh đổi ở RESEARCH.md mục 3.2. Còn lại: lỗi gõ bên trong chuỗi dính, sửa muộn khi ranh giới yếu, và học cách chọn; từ nước ngoài hoặc tên riêng tình cờ tách được vẫn là rủi ro khi hạ ngưỡng.

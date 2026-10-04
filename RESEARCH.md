@@ -107,6 +107,43 @@ Theo loại lỗi (ba kho tiếng Việt gộp lại, môi trường normal → 
   137, 4 từ 0 trên 85, 5 từ 0 trên 59, ở môi trường normal). Màn hình giữ chữ thô (`giastreen`); một phần
   ca 2 từ bị sửa sai mất chữ (`toanfan` → `toàn`), tiếng Anh dính hai từ bị sửa sai nhiều nhất.
 
+### 3.2 Bộ tách âm tiết v1 (`ac-core/src/smart/split.rs`, 2026-10-04)
+
+Luật, chưa học: quy hoạch động theo chỗ cắt (beam 6), mỗi đoạn phải là âm tiết hợp lệ và đủ phổ biến
+(`split_floor`), điểm là tổng ln P (KN) với từ trước làm ngữ cảnh. Chỉ cắt khi mọi âm tiết sau âm tiết đầu
+đều khả dĩ hơn khi đứng sau từ trước so với đứng một mình (`split_lift`) và cách cắt tốt nhất hơn cách thứ
+hai (`split_margin`). Chạy sau các cách sửa một phím và trước các cách sửa hai phím, chỉ cho chuỗi không
+phải từ. Engine thay một từ bằng k từ; từ cuối là ngữ cảnh cho từ sau; Ctrl+Z trả lại chuỗi phím.
+
+Kết quả (400 câu mỗi kho, `--join 0.5`, ba kho tiếng Việt gộp, môi trường normal, ngưỡng mặc định
+margin 2, lift 1, floor 5; tắt hẳn bộ tách thì sửa đúng 0% ở mọi k):
+
+| Số từ dính | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|
+| Sửa đúng | 53% | 41% | 20% | 12% |
+
+Quét `split_lift` (margin 2, floor 5), cùng mẫu (khoảng 250, 150, 90, 60 đoạn dính cho k = 2 đến 5);
+"đổi nhầm" là số từ gõ đúng bị app đổi, trên khoảng 21 150 từ:
+
+| lift | 99 (tắt) | 2 | 1 (mặc định) | 0,5 | 0 | -1 |
+|---|---|---|---|---|---|---|
+| Sửa đúng 2 từ | 0% | 36% | 53% | 58% | 66% | 77% |
+| Sửa đúng 3 từ | 0% | 26% | 41% | 47% | 58% | 70% |
+| Sửa đúng 4 từ | 0% | 10% | 20% | 27% | 34% | 49% |
+| Sửa đúng 5 từ | 0% | 2% | 12% | 21% | 34% | 37% |
+| Đổi nhầm từ đúng | 46 | 48 | 53 | 56 | 60 | 70 |
+
+`split_margin` (1 đến 3) và `split_floor` (4 đến 6) gần như không đổi gì (quét trước khi đổi thứ tự thử các cách sửa). Lift thấp hơn sửa nhiều hơn
+nhưng đổi nhầm thêm toàn từ nước ngoài và tên riêng tình cờ tách được (`Musiala` → `Mu sia la`,
+`learners`, `vincom`, `rotundin`), nên mặc định giữ 1,0 (ưu tiên độ chính xác).
+
+Chi phí trên bộ đo cũ `ac-bench` (không có đoạn dính): golden vẫn đạt đủ; lỗi gõ một phím của tiếng Việt:
+sửa đúng 40,7% → 40,5%, sửa sai 6,9% → 7,4% (từ chuỗi "bỏ sót" nay bị tách ra); tiếng Anh: 1 trên 5035 từ
+đúng bị đổi thêm.
+
+Chưa làm: lỗi gõ nằm bên trong chuỗi dính (`quanhejf`), cắt khi một ranh giới yếu (min lift) mà ngữ cảnh
+phía phải mạnh (sửa muộn), và học cách chọn thay cho luật.
+
 ## 4. Dữ liệu thật: hiện có gì
 
 Nhật ký trên máy (đếm ngày 2026-10-04, chỉ số tổng hợp): 97 dòng, gồm 92 `FIX` và 5 `LATE`;
@@ -134,7 +171,7 @@ tự sửa tay (Backspace vào từ rồi gõ lại), đã được engine bắt
 | R0 | Dấu đóng `) ] } "` kết thúc từ như dấu phẩy (yêu cầu #5) | Xong trong mã (sim xác nhận `saoi)` → `sao`), chờ thử thật |
 | R1 | Sim v1: người gõ, engine thật, màn hình, làn đối chứng, Ctrl+Z, xuất JSONL | Xong, kết quả ở mục 3.1 |
 | R2 | Hiệu chỉnh người gõ bằng lỗi thật (cần `journal_edits`) | Chờ dữ liệu |
-| R2b | Thiếu dấu cách (#6): tách k âm tiết (quy hoạch động), engine thay một từ bằng k từ, đo theo k bằng sim | Đề xuất |
+| R2b | Thiếu dấu cách (#6): tách k âm tiết (quy hoạch động), engine thay một từ bằng k từ, đo theo k bằng sim | Bản đầu xong (mục 3.2); thiếu: lỗi gõ bên trong chuỗi dính, học cách chọn |
 | R3 | Mô hình học cho yêu cầu #1 và #4 (lỗi từ hợp lệ theo ngữ cảnh, có để nguyên) | |
 | R4 | Thích nghi môi trường và học trực tuyến (#2) | |
 | R5 | Ngữ pháp (#3) | |

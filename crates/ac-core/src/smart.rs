@@ -21,6 +21,8 @@ use crate::edits::{bag_distance, edits1, letter_counts, slip_cost, FAR_MAX_COST}
 use crate::lexicon::Lexicon;
 use crate::personal::Personal;
 
+mod split;
+
 /// Score of a well-formed Vietnamese syllable missing from the lexicon
 /// (about 20 per billion).
 const UNSEEN_SYLLABLE: f64 = 3.0;
@@ -93,6 +95,14 @@ pub struct Tuning {
     /// Bare words that are also English words at least this common ("the",
     /// "do", "can") are left alone.
     pub restore_english: f64,
+    /// Keys that are no word are cut into syllables ("quanheej" -> "quan hệ") only if
+    /// the best cut beats the second best by this much...
+    pub split_margin: f64,
+    /// ...every syllable after the first is at least this much likelier after the one
+    /// before it than on its own...
+    pub split_lift: f64,
+    /// ...and every syllable is at least this common (ln per billion).
+    pub split_floor: f64,
 }
 
 impl Default for Tuning {
@@ -117,6 +127,9 @@ impl Default for Tuning {
             restore_margin: 6.5,
             restore_ambiguity: 1.5,
             restore_english: 8.0,
+            split_margin: 2.0,
+            split_lift: 1.0,
+            split_floor: 5.0,
         }
     }
 }
@@ -791,6 +804,14 @@ impl Corrector for SmartCorrector {
         if let Some(best) = confident(&near, typed_penalised, t.margin, t.floor, t.ambiguity) {
             return Some(match_case(word, best));
         }
+        // Keys that are no word and no word's slip: perhaps several words typed without
+        // the spaces ("quanheej"). After the one-slip fixes, so that a plain typo is
+        // never cut up, and before the two-slip ones, which would make one word of it.
+        if typed == f64::NEG_INFINITY {
+            if let Some(fix) = self.split_run(&keys, history) {
+                return Some(match_case(word, &fix));
+            }
+        }
         // Two slips: only for unknown words, never names.
         if typed == f64::NEG_INFINITY && !capitalised && keys.len() >= FAR_MIN_KEYS {
             let far = self.far_candidates(&keys, ctx);
@@ -973,6 +994,41 @@ mod tests {
         // Without the second word there is nothing to revise.
         assert!(run("that ").iter().all(|a| matches!(a, Action::Pass | Action::Replace { .. })));
         assert_eq!(run("that ").last(), Some(&Action::Pass));
+    }
+
+    /// Words typed without the spaces between them are cut into syllables.
+    #[test]
+    fn splits_words_typed_without_spaces() {
+        let c = corrector();
+        assert_eq!(c.correct_in("quanheej", &[]).as_deref(), Some("quan hệ"));
+        assert_eq!(c.correct_in("Quanheej", &[]).as_deref(), Some("Quan hệ"));
+        // Real words and ordinary typos are not cut.
+        assert_eq!(c.correct_in("nhieeu", &[]), None);
+        assert_eq!(c.correct_in("teh", &[]).as_deref(), Some("the"));
+    }
+
+    /// The engine puts the spaces in, keeps the last word as context, and Ctrl+Z
+    /// brings the keys back.
+    #[test]
+    fn engine_cuts_a_run_of_words_and_undoes_it() {
+        use crate::{Action, Engine, Key};
+        let mut e = Engine::new(corrector());
+        e.set_vietnamese(true);
+        for c in "mooitruwowngf".chars() {
+            e.on_key(Key::Char(c));
+        }
+        e.on_key(Key::Space);
+        for c in "quanheej".chars() {
+            e.on_key(Key::Char(c));
+        }
+        match e.on_key(Key::Space) {
+            // Only what differs from the screen is sent: "quan" is already there.
+            Action::Replace { text, .. } => assert!(text.ends_with(" hệ "), "{text:?}"),
+            other => panic!("expected a split, got {other:?}"),
+        }
+        assert_eq!(e.context(), Some("hệ"));
+        assert_eq!(e.history().last().map(String::as_str), Some("hệ"));
+        assert!(matches!(e.on_key(Key::Undo), Action::Replace { .. }));
     }
 
     /// The hard-case journal: a word left alone with two close readings is

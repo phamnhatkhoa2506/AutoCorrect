@@ -512,8 +512,19 @@ impl<C: Corrector> Engine<C> {
                 replace(&word.shown, &format!("{fix} "))
             };
             self.committed = self.committed + fix.chars().count() - shown_len;
-            self.prev_word = Some(self.word_showing(&fix));
-            self.context = (!punct).then(|| fix.clone());
+            // Several words from one ("quanheej" -> "quan hệ"): the last one is the context
+            // for the next word, the others come before it.
+            let last = fix.rsplit(' ').next().unwrap_or(&fix).to_string();
+            self.prev_word = Some(self.word_showing(&last));
+            self.context = (!punct).then(|| last.clone());
+            if self.context.is_some() && last.len() != fix.len() {
+                let mut before = remember(&earlier, context.as_deref());
+                let count = fix.split(' ').count();
+                for word in fix.split(' ').take(count - 1) {
+                    before = remember(&before, Some(word));
+                }
+                self.earlier = before;
+            }
             self.last = Some(LastCorrection {
                 original: word,
                 corrected: fix.clone(),

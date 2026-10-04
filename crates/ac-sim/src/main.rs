@@ -3,6 +3,7 @@
 //!     cargo run -p ac-sim --release -- [--sentences N] [--env normal|code|both] [--seed S]
 //!         [--rate R] [--notice P] [--undo P] [--wrap P] [--join P] [--join-max N]
 //!         [--strength 0|1|2] [--no-delayed] [--code-english]
+//!         [--split-margin M] [--split-lift L] [--split-floor F]
 //!         [--show N] [--export out.jsonl]
 //!
 //! Every sentence is a held-out one (never used to build the word tables),
@@ -74,6 +75,11 @@ fn main() {
         delayed: !has("--no-delayed"),
         code_english: has("--code-english"),
         strength: flag("--strength", 1.0) as u8,
+        split: {
+            let d = ac_core::Tuning::default();
+            let given = has("--split-margin") || has("--split-lift") || has("--split-floor");
+            given.then(|| (flag("--split-margin", d.split_margin), flag("--split-lift", d.split_lift), flag("--split-floor", d.split_floor)))
+        },
         ..AppSettings::default()
     };
     let envs = match value("--env").as_deref() {

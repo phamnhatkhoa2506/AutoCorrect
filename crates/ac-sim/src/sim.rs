@@ -35,12 +35,15 @@ pub struct AppSettings {
     pub code_english: bool,
     /// `Tuning::preset` level: 0 careful, 1 balanced, 2 bold.
     pub strength: u8,
+    /// Overrides of the thresholds for cutting words typed without spaces:
+    /// margin, lift, floor (`Tuning::split_*`).
+    pub split: Option<(f64, f64, f64)>,
 }
 
 impl Default for AppSettings {
     /// The app's defaults, with delayed revision on.
     fn default() -> Self {
-        Self { delayed: true, restore_marks: true, code_english: false, strength: 1 }
+        Self { delayed: true, restore_marks: true, code_english: false, strength: 1, split: None }
     }
 }
 
@@ -53,7 +56,11 @@ pub fn configure(engine: &mut Engine<SmartCorrector>, env: Env, s: AppSettings) 
     let english = env == Env::Normal || s.code_english;
     engine.set_corrections(true, english);
     engine.set_restore_marks(s.restore_marks && env == Env::Normal);
-    engine.corrector_mut().set_tuning(Tuning::preset(s.strength));
+    let mut tuning = Tuning::preset(s.strength);
+    if let Some((margin, lift, floor)) = s.split {
+        (tuning.split_margin, tuning.split_lift, tuning.split_floor) = (margin, lift, floor);
+    }
+    engine.corrector_mut().set_tuning(tuning);
 }
 
 /// What became of a word.
@@ -121,24 +128,17 @@ impl WordResult {
     }
 }
 
-/// The screen text of each word meant, in order, or `None` if the screen no
-/// longer lines up with them. Several words typed without the spaces between
-/// them ("quan hệ" as "quanheej") are one word meant that covers one screen
-/// word, or as many as the app split it into; there is at most one such run per
-/// sentence, so the number of extra screen words tells how many.
-fn per_word(screen: &[String], words: &[WordResult]) -> Option<Vec<String>> {
-    let extra = screen.len().checked_sub(words.len())?;
-    if extra > 0 && !words.iter().any(|w| w.intended.contains(' ')) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(words.len());
-    let mut at = 0;
-    for w in words {
-        let take = if w.intended.contains(' ') { 1 + extra } else { 1 };
-        out.push(screen.get(at..at + take)?.join(" "));
-        at += take;
-    }
-    (at == screen.len()).then_some(out)
+/// The screen text of each word meant, in order: the screen words from where the
+/// word began to where the next one began (the app may turn one typed word into
+/// several, "quanheej" into "quan hệ"), or `None` if the screen has fewer words
+/// than a start says.
+fn per_word(screen: &[String], starts: &[usize]) -> Option<Vec<String>> {
+    (0..starts.len())
+        .map(|i| {
+            let end = starts.get(i + 1).copied().unwrap_or(screen.len());
+            screen.get(starts[i]..end).map(|words| words.join(" "))
+        })
+        .collect()
 }
 
 /// A sentence typed in full: its words, or why they could not be scored.
@@ -167,6 +167,10 @@ pub struct Sim {
     plain: Lane<DictCorrector>,
     profile: Profile,
     rng: Rng,
+    /// For each word of the sentence being typed: how many words each lane's screen
+    /// held when it began.
+    starts_main: Vec<usize>,
+    starts_plain: Vec<usize>,
 }
 
 impl Sim {
@@ -182,7 +186,15 @@ impl Sim {
             plain: Lane { engine: plain, screen: Screen::default() },
             profile,
             rng: Rng::new(seed),
+            starts_main: Vec::new(),
+            starts_plain: Vec::new(),
         }
+    }
+
+    /// A word is about to be typed.
+    fn word_begins(&mut self) {
+        self.starts_main.push(self.main.screen.words().len());
+        self.starts_plain.push(self.plain.screen.words().len());
     }
 
     /// Where a run of 2 to `join_max` Vietnamese words typed without spaces starts, and
@@ -212,6 +224,8 @@ impl Sim {
         self.press(Key::Reset, None);
         self.main.screen.clear();
         self.plain.screen.clear();
+        self.starts_main.clear();
+        self.starts_plain.clear();
         let mut words: Vec<WordResult> = Vec::new();
         // Now and then the spaces between a run of Vietnamese words are left out.
         let join = self.pick_run(plan);
@@ -226,6 +240,7 @@ impl Sim {
                         })
                         .collect();
                     let typed: String = run.iter().map(|(_, keys)| keys.as_str()).collect();
+                    self.word_begins();
                     for c in typed.chars() {
                         self.press(Key::Char(c), Some(c));
                     }
@@ -247,6 +262,7 @@ impl Sim {
                     let slip =
                         if self.rng.chance(self.profile.rate) { self.profile.slip(keys, *vietnamese, &mut self.rng) } else { None };
                     let typed = slip.as_ref().map_or_else(|| keys.clone(), |(_, k)| k.clone());
+                    self.word_begins();
                     for c in typed.chars() {
                         self.press(Key::Char(c), Some(c));
                     }
@@ -267,7 +283,7 @@ impl Sim {
             i += 1;
         }
         let (Some(shown), Some(baseline)) =
-            (per_word(&self.main.screen.words(), &words), per_word(&self.plain.screen.words(), &words))
+            (per_word(&self.main.screen.words(), &self.starts_main), per_word(&self.plain.screen.words(), &self.starts_plain))
         else {
             return Typed::Misaligned;
         };
@@ -289,18 +305,18 @@ impl Sim {
     /// A key that ends a word, which may correct it or revise the one before.
     /// The typist looks at the words that changed and may press Ctrl+Z.
     fn boundary(&mut self, key: Key, typed: Option<char>, words: &mut [WordResult]) {
-        let before = per_word(&self.main.screen.words(), words);
+        let before = per_word(&self.main.screen.words(), &self.starts_main);
         if self.press(key, typed) == Action::Pass {
             return;
         }
-        let (Some(before), Some(after)) = (before, per_word(&self.main.screen.words(), words)) else {
+        let (Some(before), Some(after)) = (before, per_word(&self.main.screen.words(), &self.starts_main)) else {
             return;
         };
         let changed: Vec<usize> = (0..after.len()).filter(|&i| before[i] != after[i]).collect();
         for &i in &changed {
             words[i].app_wrote = Some(after[i].clone());
         }
-        let typed = per_word(&self.plain.screen.words(), words).unwrap_or_default();
+        let typed = per_word(&self.plain.screen.words(), &self.starts_plain).unwrap_or_default();
         let wrong =
             changed.iter().any(|&i| !is_meant(&after[i], &words[i].intended, typed.get(i).map_or("", String::as_str)));
         if wrong && self.rng.chance(self.profile.undo) {

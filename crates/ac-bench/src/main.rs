@@ -836,6 +836,9 @@ fn main() {
         restore_margin: flag("--restore-margin", d.restore_margin),
         restore_ambiguity: flag("--restore-ambiguity", d.restore_ambiguity),
         restore_english: flag("--restore-english", d.restore_english),
+        split_margin: flag("--split-margin", d.split_margin),
+        split_lift: flag("--split-lift", d.split_lift),
+        split_floor: flag("--split-floor", d.split_floor),
     };
 
     let root: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
