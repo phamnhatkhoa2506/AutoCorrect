@@ -44,7 +44,7 @@ pub fn build(raw: &Path, corpora: &[Corpus], language: Language, lexicon: &Lexic
     for corpus in corpora {
         let Some(path) = sentence_file(raw, corpus.dir) else { continue };
         let repeat = if corpus.dir == "vie_social_train" { social_weight } else { 1 };
-        for sentence in training_sentences(&path)?.into_iter().flat_map(|s| std::iter::repeat(s).take(repeat)) {
+        for sentence in training_sentences(&path)?.into_iter().flat_map(|s| std::iter::repeat_n(s, repeat)) {
             let toks = tokens(&sentence, language, lexicon);
             for w in toks.windows(2) {
                 if let (Token::Word(Some(b)), Token::Word(Some(w))) = (w[0], w[1]) {
