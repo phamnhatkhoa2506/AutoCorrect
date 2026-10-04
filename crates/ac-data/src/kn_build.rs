@@ -38,9 +38,13 @@ pub fn build(raw: &Path, corpora: &[Corpus], language: Language, lexicon: &Lexic
     let vocab = lexicon.len();
     let mut c3: HashMap<u64, u32> = HashMap::new();
     let mut c2: HashMap<u32, u32> = HashMap::new();
+    // The small casual-speech corpus is repeated this many times (AC_SOCIAL_WEIGHT) so that
+    // its few thousand sentences count against millions from other registers.
+    let social_weight: usize = std::env::var("AC_SOCIAL_WEIGHT").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
     for corpus in corpora {
         let Some(path) = sentence_file(raw, corpus.dir) else { continue };
-        for sentence in training_sentences(&path)? {
+        let repeat = if corpus.dir == "vie_social_train" { social_weight } else { 1 };
+        for sentence in training_sentences(&path)?.into_iter().flat_map(|s| std::iter::repeat(s).take(repeat)) {
             let toks = tokens(&sentence, language, lexicon);
             for w in toks.windows(2) {
                 if let (Token::Word(Some(b)), Token::Word(Some(w))) = (w[0], w[1]) {

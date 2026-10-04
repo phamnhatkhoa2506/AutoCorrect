@@ -49,7 +49,8 @@ pub fn sentence_file(raw: &Path, dir: &str) -> Option<PathBuf> {
 /// The training sentences of a corpus (everything but the held-out tail).
 pub fn training_sentences(path: &Path) -> std::io::Result<Vec<String>> {
     let lines: Vec<String> = BufReader::new(File::open(path)?).lines().collect::<Result<_, _>>()?;
-    let keep = lines.len().saturating_sub(HELD_OUT_SENTENCES);
+    // The social-media training split is its own small file; its test split is another.
+    let keep = if path.to_string_lossy().contains("vie_social_train") { lines.len() } else { lines.len().saturating_sub(HELD_OUT_SENTENCES) };
     Ok(lines.into_iter().take(keep).map(|l| l.split('\t').nth(1).unwrap_or("").to_string()).collect())
 }
 

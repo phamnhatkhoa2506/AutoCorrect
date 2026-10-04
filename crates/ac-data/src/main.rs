@@ -106,10 +106,14 @@ fn write_kn(root: &Path, raw: &Path) -> std::io::Result<()> {
     use bigrams::{Corpus, Language};
 
     let jobs = [
-        ("vi", Language::Vietnamese, vec![Corpus { dir: "vie_news_2022_1M" }, Corpus { dir: "vie-vn_web_2015_1M" }, Corpus { dir: "vie_subtitles" }]),
+        ("vi", Language::Vietnamese, vec![Corpus { dir: "vie_news_2022_1M" }, Corpus { dir: "vie-vn_web_2015_1M" }, Corpus { dir: "vie_subtitles" }, Corpus { dir: "vie_social_train" }]),
         ("en", Language::English, vec![Corpus { dir: "eng_news_2023_1M" }]),
     ];
     for (code, language, corpora) in jobs {
+        // AC_KN_ONLY=vi builds just that language.
+        if std::env::var("AC_KN_ONLY").is_ok_and(|only| only != code) {
+            continue;
+        }
         let tsv = root.join(match code {
             "vi" => "data/vi_syllables.tsv",
             _ => "data/en_words.tsv",
