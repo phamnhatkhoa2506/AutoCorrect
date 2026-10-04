@@ -50,6 +50,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac-sim"
+version = "0.1.0"
+dependencies = [
+ "ac-core",
+ "ac-telex",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "ac-telex"
 version = "0.1.0"
 

@@ -1,0 +1,10 @@
+[package]
+name = "ac-sim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ac-core = { path = "../ac-core" }
+ac-telex = { path = "../ac-telex" }
+unicode-normalization = "0.1"

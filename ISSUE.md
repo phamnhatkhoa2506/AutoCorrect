@@ -27,7 +27,11 @@ Giải pháp có thể: ...
 | 9 | Mất ngữ cảnh giữa hai từ ở terminal | Đang điều tra |
 | 10 | Thỉnh thoảng gõ tiếng Việt không được một lúc | Đang điều tra |
 | 11 | Cơ chế guard chống sửa sai | Ý tưởng |
-| 12 | Gốc: bước sinh ứng viên bỏ sót từ đúng (triệu chứng: #2, #4, #5, `ngẫy nhiên`) | Đang điều tra |
+| 12 | Giả thuyết: bước sinh ứng viên bỏ sót từ đúng (`that là`, `ngẫy nhiên` đã bị bác bỏ) | Cần làm rõ |
+| 13 | Notepad bản mới: Autocorrect/Spell check làm hỏng chữ app chèn | Đã giải quyết (bằng cấu hình) |
+| 14 | Chữ viết tắt in hoa và tên riêng bị đổi nhầm (`CPI` → `COI`, `Xavi` → `Xạ`) | Mở |
+| 15 | Tiếng Anh gõ ở chế độ Việt không bao giờ được sửa lại (`of` → `ò`) | Mở |
+| 16 | Sửa muộn đổi `that` trong câu tiếng Anh thành `thật` | Mở |
 
 ---
 
@@ -169,8 +173,8 @@ Trạng thái: Ý tưởng | Nguồn: bạn đề xuất, 2026-10-04
 
 ---
 
-## #12. Gốc: bước sinh ứng viên bỏ sót từ đúng
-Trạng thái: Đang điều tra | Nguồn: bạn báo `mọi thứ chỉ là ngẫy nhiên` và `that là`, 2026-10-04 | Liên quan: #2, #4, #5
+## #12. Giả thuyết: bước sinh ứng viên bỏ sót từ đúng
+Trạng thái: Cần làm rõ | Nguồn: bạn báo `mọi thứ chỉ là ngẫy nhiên` và `that là`, 2026-10-04 | Liên quan: #2, #4, #5
 
 **Mô tả:** Sửa muộn (`delayed=1`, đang bật) vẫn không sửa được. Phần chấm điểm ngữ cảnh chỉ chọn trong danh sách ứng viên do bước sinh đưa ra; từ đúng không có trong danh sách thì ngữ cảnh mạnh đến đâu cũng không cứu được.
 
@@ -186,3 +190,52 @@ Trạng thái: Đang điều tra | Nguồn: bạn báo `mọi thứ chỉ là ng
 - Thêm ứng viên "thiếu phím thanh" khi từ không có dấu thanh.
 - Khi sửa muộn có từ phía phải, cho phép đổi dấu thanh hoặc nguyên âm kề phím ở âm tiết hợp lệ.
 - Về lâu dài: học bộ sinh ứng viên từ dữ liệu lỗi gõ thật.
+
+**Cập nhật (2026-10-04): giả thuyết trên bị bác bỏ ở hai ca.** Sau khi tắt Autocorrect/Spell check của Notepad (xem #13), `that laf ` ra `thật là` và `ngẫy nhiên` ra `ngẫu nhiên`: sửa muộn sinh được cả `thật` lẫn `ngẫu`. Danh sách `top: thay, thả, tha` là của bước sửa tức thì, không phải của sửa muộn. Phần "bước sinh bỏ sót" còn lại cần đo trên lỗi thật mới kết luận được; #2 (`ngượi`) và #5 (`thicsk`) chưa được thử lại.
+
+---
+
+## #13. Notepad bản mới: Autocorrect/Spell check làm hỏng chữ app chèn
+Trạng thái: Đã giải quyết (bằng cấu hình) | Nguồn: bạn báo, 2026-10-04
+
+**Mô tả:** Ở Notepad (Windows 11), cùng một lần sửa `that laf ` cho ra `that àà ` thay vì `thật là`, lặp lại mãi, trong khi log của app ghi đúng (`FIX là -5 +"ật là "`).
+
+**Nguyên nhân (xác nhận bằng thử nghiệm):** tính năng Autocorrect/Spell check của chính Notepad. Tắt hai mục này trong cài đặt Notepad thì hết lỗi.
+
+**Giải pháp có thể:**
+- Ghi chú trong README/cài đặt: tắt Autocorrect và Spell check của Notepad khi dùng app.
+- Chưa có cách để app tự tránh; nếu muốn, có thể phát hiện Notepad và cảnh báo một lần.
+- Khi gặp ứng dụng khác ra chữ sai dù log đúng, kiểm tra trước xem ứng dụng đó có tự sửa chữ không.
+
+---
+
+## #14. Chữ viết tắt in hoa và tên riêng bị đổi nhầm
+Trạng thái: Mở | Nguồn: sim `ac-sim`, 2026-10-04 (RESEARCH.md mục 3.1)
+
+**Mô tả:** Trong các ca app đổi nhầm từ gõ đúng ở môi trường normal, nhóm lớn nhất là chữ viết tắt in hoa (`AMG` → `AM`, `ENDF` → `END`, `CPI` → `COI`, `BYD` → `BY`) và tên riêng (`Xavi` → `Xạ`, `Tieran` → `Tiên`, `Zachor` → `Chỏ`).
+
+**Giải pháp có thể:**
+- Guard theo hình dạng: không sửa từ in hoa toàn bộ dài từ 2 ký tự (lớp 1 của #11). Đo lại bằng sim trước và sau.
+- Tên riêng viết hoa chữ đầu ở giữa câu: chỉ sửa khi rất tự tin; về lâu dài để mô hình học quyết định.
+
+---
+
+## #15. Tiếng Anh gõ ở chế độ Việt không bao giờ được sửa lại
+Trạng thái: Mở | Nguồn: sim `ac-sim`, 2026-10-04 | Liên quan: yêu cầu #1 trong RESEARCH.md
+
+**Mô tả:** Gõ tiếng Anh khi đang ở chế độ Việt, Telex đổi từ thành chữ Việt hợp lệ: `of` → `ò`, `this` → `thí`, `was` → `ứa`, `there` → `thể`, `down` → `dơn`. App bỏ sót tất cả (10,5% số từ tiếng Anh trong sim, 600 trên 5732): bộ sửa thấy phím `of` là một từ đúng nên không động vào, trong khi màn hình hiện `ò`.
+
+**Giải pháp có thể:**
+- Khi chuỗi phím là một từ tiếng Anh phổ biến mà kết quả Telex là chữ Việt hiếm trong ngữ cảnh (bên trái là tiếng Anh), trả lại chữ thô. Cần nhận diện ngôn ngữ theo ngữ cảnh: đây chính là bài toán học của yêu cầu #1.
+- Đo: nhóm `(Telex)` trong bảng của sim.
+
+---
+
+## #16. Sửa muộn đổi `that` trong câu tiếng Anh thành `thật`
+Trạng thái: Mở | Nguồn: sim `ac-sim`, 2026-10-04 | Liên quan: #4
+
+**Mô tả:** "the impact that may" → `thật`: sửa muộn đổi một từ tiếng Anh đúng sang tiếng Việt dù ngữ cảnh hai bên đều là tiếng Anh. Mặt trái của chính tính năng đã sửa được `that là` → `thật là`.
+
+**Giải pháp có thể:**
+- Không đổi sang tiếng Việt khi cả từ trước lẫn từ sau là tiếng Anh.
+- Về lâu dài: cùng bài toán nhận diện ngôn ngữ theo ngữ cảnh như #15.
