@@ -471,12 +471,6 @@ impl SmartCorrector {
                 if typed_texts.contains(&text) || required.as_ref().is_some_and(|r| !same_word(r, &skeleton(&text))) {
                     continue;
                 }
-                // Without English corrections (terminals, IDEs) an unaccented
-                // Vietnamese fix is just another English-looking word: "teh"
-                // must not become "the" (a Vietnamese word too) in code.
-                if !self.english && text.is_ascii() {
-                    continue;
-                }
                 let e = scores.entry(text).or_insert(f64::NEG_INFINITY);
                 *e = log_add(*e, f - slip.cost);
             }
@@ -514,10 +508,15 @@ impl SmartCorrector {
                 consider(&self.vi_keys[id], word, *f, &bigram, &|| self.language_bias(ctx, self.en.id(word).is_some(), true));
             }
         }
-        if !self.english {
-            scores.retain(|text, _| !text.is_ascii());
-        }
         sorted(scores)
+    }
+
+    /// In terminals and IDEs (no English corrections) an unaccented fix is just another
+    /// English-looking word: "teh" must not become "the" there. But such a reading must
+    /// still compete, and when it is the best one the word is left alone: dropping it
+    /// would let a worse accented reading win ("namk" -> "năm" instead of "nam").
+    fn unaccented_wins(&self, candidates: &[(String, f64)]) -> bool {
+        !self.english && candidates.first().is_some_and(|(text, _)| text.is_ascii())
     }
 
     /// Scores every correction of `word` (raw keys), for diagnostics.
@@ -785,6 +784,9 @@ impl Corrector for SmartCorrector {
         let typed_penalised = typed - self.tuning.rare_typed_penalty;
 
         let near = self.candidates(&keys, vietnamese, ctx, true);
+        if self.unaccented_wins(&near) {
+            return None;
+        }
         let t = &self.tuning;
         if let Some(best) = confident(&near, typed_penalised, t.margin, t.floor, t.ambiguity) {
             return Some(match_case(word, best));
@@ -792,6 +794,9 @@ impl Corrector for SmartCorrector {
         // Two slips: only for unknown words, never names.
         if typed == f64::NEG_INFINITY && !capitalised && keys.len() >= FAR_MIN_KEYS {
             let far = self.far_candidates(&keys, ctx);
+            if self.unaccented_wins(&far) {
+                return None;
+            }
             return confident(&far, typed, t.margin, t.far_floor, t.far_ambiguity).map(|best| match_case(word, best));
         }
         None
@@ -1139,6 +1144,19 @@ mod tests {
         assert_eq!(c.correct("dunhf").as_deref(), Some("dùng"));
         assert_eq!(c.correct("git"), None);
         assert_eq!(c.correct("cargo"), None);
+    }
+
+    /// "namk" in a terminal (typed after "việt"): the best reading is the unaccented
+    /// "nam". It is not applied there, but it must not hand the win to "năm" either.
+    #[test]
+    fn code_mode_does_not_let_a_worse_accented_word_win() {
+        let mut c = corrector();
+        c.set_languages(true, false);
+        assert_eq!(c.correct_in("namk", &["việt"]), None);
+        assert_eq!(c.correct_in("namk", &[]), None);
+        // With English corrections on the unaccented fix is allowed, as before.
+        c.set_languages(true, true);
+        assert_eq!(c.correct_in("namk", &["việt"]).as_deref(), Some("nam"));
     }
 
     #[test]
