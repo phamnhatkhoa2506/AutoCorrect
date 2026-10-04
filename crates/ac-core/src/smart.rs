@@ -70,6 +70,13 @@ pub struct Tuning {
     /// Use the Kneser-Ney tables instead of mixing pairs and triples with
     /// fixed weights (when the tables are loaded).
     pub kn: bool,
+    /// Delayed revision (see [`SmartCorrector::revise`]): how much better than the word
+    /// as typed the best reading must score once the next word is known. Readings
+    /// that change letters of a well-formed syllable need the larger margin.
+    pub revise_margin: f64,
+    pub revise_margin_x: f64,
+    /// ...and how far it must beat the second best.
+    pub revise_ambiguity: f64,
     /// Penalty for a candidate of the other language than the previous word
     /// (an English word after an English word is more likely English).
     pub language_penalty: f64,
@@ -102,6 +109,9 @@ impl Default for Tuning {
             bigram_weight: 0.5,
             trigram_weight: 0.7,
             kn: true,
+            revise_margin: 8.0,
+            revise_margin_x: 12.0,
+            revise_ambiguity: 3.0,
             language_penalty: 3.0,
             phrase_decay: 0.7,
             restore_margin: 6.5,
@@ -515,6 +525,62 @@ impl SmartCorrector {
         self.rank_in(word, prev.as_slice())
     }
 
+    /// Delayed revision: a word the immediate correction left alone, looked at again
+    /// once the word after it is typed. `right` holds the words typed since (one in
+    /// practice). Candidates include letter changes to well-formed syllables ("ngẫy"
+    /// -> "ngẫu"), which the immediate correction never tries; they need a larger
+    /// margin. Not used by the app yet: measured by `ac-bench --delayed`.
+    pub fn revise(&self, word: &str, history: &[&str], right: &[String]) -> Option<String> {
+        if right.is_empty() || !self.vietnamese || self.personal.ignores(&word.to_lowercase()) {
+            return None;
+        }
+        let keys = Self::keys_of(word)?;
+        let capital = word.chars().next().is_some_and(char::is_uppercase);
+        let (typed_score, vietnamese) = self.typed(&keys);
+        // A capitalised word that is known or follows another word is most likely a name.
+        if capital && (typed_score > f64::NEG_INFINITY || !history.is_empty()) {
+            return None;
+        }
+        let shown = vietnamese.clone().unwrap_or_else(|| keys.clone());
+        let bare = self.vietnamese && self.restore && !capital && compose(&keys).text == keys;
+        let (ranking, extra) = if bare {
+            (self.rank_bare(&keys, history)?, Vec::new())
+        } else {
+            let ranking = self.rank_in(word, history)?;
+            let extra: Vec<(String, f64)> = if vietnamese.is_some() {
+                self.rank_expanded(word, history)
+                    .map(|r| r.candidates)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|(w, _)| !ranking.candidates.iter().any(|(b, _)| b == w))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            (ranking, extra)
+        };
+        let after = |text: &str| {
+            let vi = self.vietnamese && self.vi.id(&text.to_lowercase()).is_some();
+            self.right_context_score(vi, history, text, right)
+        };
+        let finite = |s: f64| if s.is_finite() { s } else { -99.0 };
+        let keep = finite(ranking.typed) + after(&shown);
+        let mut all: Vec<(String, f64, bool)> = ranking
+            .candidates
+            .iter()
+            .map(|(w, s)| (w.clone(), finite(*s) + after(w), false))
+            .chain(extra.iter().map(|(w, s)| (w.clone(), finite(*s) + after(w), true)))
+            .collect();
+        // Only Vietnamese readings (with marks): this is a Vietnamese revision, and
+        // English words changed this way cost far more wrong fixes than they gain.
+        all.retain(|(w, _, _)| !w.is_ascii());
+        all.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let (top, top_score, expanded) = all.first()?.clone();
+        let second = all.get(1).map_or(f64::NEG_INFINITY, |c| c.1);
+        let margin = if expanded { self.tuning.revise_margin_x } else { self.tuning.revise_margin };
+        (top_score - keep >= margin && top_score - second >= self.tuning.revise_ambiguity).then(|| match_case(word, &top))
+    }
+
     /// For the hard-case journal: a word left alone although it had a close
     /// alternative. Returns a short note ("best score | next score | typed
     /// score"), or `None` when the word is plainly fine or has no plausible
@@ -859,6 +925,26 @@ mod tests {
         assert_ne!(c.correct_after("ays", Some("three")).as_deref(), Some("ấy"));
     }
 
+    /// Delayed revision: the word after it settles what a word could not say alone.
+    #[test]
+    fn revises_a_word_once_the_next_one_is_known() {
+        let mut c = corrector();
+        let words = |w: &str| vec![w.to_string()];
+        // "that" is an English word and a bare Vietnamese syllable: alone, undecided.
+        assert_eq!(c.correct_in("that", &[]), None);
+        assert_eq!(c.revise("that", &[], &words("là")).as_deref(), Some("thật"));
+        // "ngẫy" is a valid syllable; "ngẫy nhiên" is not a pair, "ngẫu nhiên" is.
+        let typed = to_keys("ngẫy");
+        assert_eq!(c.correct_in(&typed, &[]), None);
+        assert_eq!(c.revise(&typed, &["là"], &words("nhiên")).as_deref(), Some("ngẫu"));
+        // Plain English and a finished correct word stay as they are.
+        assert_eq!(c.revise("hello", &["say"], &words("there")), None);
+        assert_eq!(c.revise("bạn", &["cho"], &words("nhé")), None);
+        // Not in Vietnamese mode: no revision.
+        c.set_languages(false, true);
+        assert_eq!(c.revise("that", &[], &words("là")), None);
+    }
+
     /// The hard-case journal: a word left alone with two close readings is
     /// reported; a plainly fine word is not.
     #[test]
@@ -935,6 +1021,21 @@ mod tests {
             let top: Vec<_> = r.iter().flat_map(|r| r.candidates.iter().take(3)).collect();
             println!("{w:>10} -> {:<12} typed {:>6.2} top {top:?}", format!("{:?}", c.correct(w)),
                 r.as_ref().map_or(f64::NAN, |r| r.typed));
+        }
+    }
+
+    /// What a delayed revision costs per word: `cargo test -p ac-core --release speed_revise -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn speed_revise() {
+        let c = corrector();
+        for (w, history, next) in [("that", vec![], "là"), ("bạn", vec!["cho"], "nhé"), ("hello", vec!["say"], "there"), ("không", vec!["tôi"], "biết")] {
+            let right = vec![next.to_string()];
+            let start = std::time::Instant::now();
+            for _ in 0..200 {
+                std::hint::black_box(c.revise(&to_keys(w), &history, &right));
+            }
+            println!("{w:>8}: {:>7.1} us/word", start.elapsed().as_secs_f64() * 1e6 / 200.0);
         }
     }
 

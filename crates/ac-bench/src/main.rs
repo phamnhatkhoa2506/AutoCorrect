@@ -5,6 +5,7 @@
 //!         [--far-floor F --far-ambiguity A --no-list]
 //!         [--bare R --restore-margin M --restore-ambiguity A --restore-english E]
 //!     cargo run -p ac-bench --release -- --export out.jsonl  (samples for the teacher model; --sentences N sets the size)
+//!     cargo run -p ac-bench --release -- --delayed [--right-typo R]  (what revising a word after the next one adds)
 //!     cargo run -p ac-bench --release -- --golden [file]    (real and reported cases, bench/golden.tsv)
 //!     cargo run -p ac-bench --release -- --from-journal [journal] [out]   (journal -> bench/journal_cases.tsv)
 //!     cargo run -p ac-bench --release -- --journal [file]   (report on your own journal)
@@ -639,6 +640,64 @@ fn noisy_word(word: &str, language: Language, rate: f64, rng: &mut Rng) -> Strin
     }
 }
 
+/// Two stages: the immediate correction, then, for words it left alone, a delayed
+/// revision once the next word is typed (`SmartCorrector::revise`). Reports what the
+/// second stage adds, per kind of word.
+fn run_delayed(corrector: &SmartCorrector, cases: &[Case], right_typo: f64, language: Language) {
+    let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+    // Per class (clean, one slip, two slips, no marks):
+    // [n, right, wrong, right after revision, wrong after revision]
+    let mut t = [[0u32; 5]; 4];
+    for case in cases {
+        let history: Vec<&str> = case.word.history.iter().map(String::as_str).collect();
+        let (keys, class) = match &case.typed {
+            None => (typed_as(&case.word.keys, case.word.capital), 0),
+            Some(x) => {
+                let class = if case.bare {
+                    3
+                } else if is_two_slips(&case.word.keys, x) {
+                    2
+                } else {
+                    1
+                };
+                (typed_as(x, case.word.capital), class)
+            }
+        };
+        let first = corrector.correct_in(&keys, &history).map(|f| f.to_lowercase());
+        let right: Vec<String> = case.word.right.iter().take(1).map(|w| noisy_word(w, language, right_typo, &mut rng)).collect();
+        let second = if first.is_none() { corrector.revise(&keys, &history, &right).map(|f| f.to_lowercase()) } else { None };
+        let combined = first.clone().or(second);
+        let truth = &case.word.text;
+        let bump = |t: &mut [[u32; 5]; 4], fix: &Option<String>, at: usize| match fix {
+            Some(f) if f == truth => t[class][at] += u32::from(class != 0),
+            Some(_) => t[class][at + 1] += 1,
+            None => {}
+        };
+        t[class][0] += 1;
+        bump(&mut t, &first, 1);
+        bump(&mut t, &combined, 3);
+    }
+    let pct = |part: u32, whole: u32| 100.0 * f64::from(part) / f64::from(whole.max(1));
+    println!("  delayed revision with the next word (typo rate in that word {right_typo}); immediate -> after revision");
+    for (name, c) in ["one slip", "two slips", "no marks"].iter().zip(&t[1..]) {
+        println!(
+            "    {name:9} {:>6} typos: right {:>5.1}% -> {:>5.1}%   wrong {:>5.1}% -> {:>5.1}%",
+            c[0],
+            pct(c[1], c[0]),
+            pct(c[3], c[0]),
+            pct(c[2], c[0]),
+            pct(c[4], c[0])
+        );
+    }
+    let c = &t[0];
+    println!(
+        "    correct words {:>6}: changed {:.2} -> {:.2} per 1000",
+        c[0],
+        1000.0 * f64::from(c[2]) / f64::from(c[0].max(1)),
+        1000.0 * f64::from(c[4]) / f64::from(c[0].max(1))
+    );
+}
+
 fn json_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -769,6 +828,9 @@ fn main() {
         bigram_weight: flag("--weight", d.bigram_weight),
         trigram_weight: flag("--tri", d.trigram_weight),
         kn: flag("--kn", f64::from(u8::from(d.kn))) > 0.0,
+        revise_margin: flag("--revise-margin", d.revise_margin),
+        revise_margin_x: flag("--revise-margin-x", d.revise_margin_x),
+        revise_ambiguity: flag("--revise-amb", d.revise_ambiguity),
         language_penalty: flag("--language", d.language_penalty),
         phrase_decay: flag("--phrase", d.phrase_decay),
         restore_margin: flag("--restore-margin", d.restore_margin),
@@ -871,6 +933,11 @@ fn main() {
                 Case { word, typed, bare: false }
             })
             .collect();
+        if args.iter().any(|a| a == "--delayed") {
+            corrector.set_context(true);
+            println!("\n== {name} ==");
+            run_delayed(&corrector, &cases, flag("--right-typo", 0.0), language);
+        }
         if let Some(out) = export_out.as_mut() {
             corrector.set_context(true);
             let set = if name == "English" { "en" } else if name.contains("dialogue") { "vd" } else if name.contains("social") { "vs" } else { "vi" };
