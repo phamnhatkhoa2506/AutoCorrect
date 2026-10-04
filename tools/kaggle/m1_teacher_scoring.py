@@ -13,7 +13,10 @@
 # Run each `# %%` block as a notebook cell. Needs a GPU (T4 / P100 is enough for 1-3B models).
 
 # %% Settings
-EXPORT_PATH = "/kaggle/input/autocorrect-export/export.jsonl"   # your private Kaggle dataset
+import glob
+# Kaggle mounts datasets under a path that has changed over time, so search for the file.
+_found = glob.glob("/kaggle/input/**/export.jsonl", recursive=True)
+EXPORT_PATH = _found[0] if _found else "/kaggle/input/autocorrect-export/export.jsonl"
 OUT_PATH = "/kaggle/working/teacher_scores.jsonl"
 MODEL_NAME = "Qwen/Qwen2.5-1.5B"    # a base (not chat) model; verify it is available and handles Vietnamese
 LOAD_4BIT = False                    # True for 7B models on a 16 GB GPU (needs bitsandbytes)
