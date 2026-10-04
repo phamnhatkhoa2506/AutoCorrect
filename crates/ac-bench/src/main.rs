@@ -672,13 +672,14 @@ fn export(
         let shown = if language == Language::Vietnamese { ac_telex::compose(&keys).text } else { keys.clone() };
         let (typed_score, candidates) = ranking.map_or((f64::NEG_INFINITY, Vec::new()), |r| (r.typed, r.candidates));
         let score = |s: f64| if s.is_finite() { s } else { -99.0 };
+        let right_score = |candidate: &str| corrector.right_context_score(language == Language::Vietnamese, &history, candidate, &case.word.right);
         let truth_in = shown.to_lowercase() == case.word.text || candidates.iter().take(8).any(|(w, _)| *w == case.word.text);
         let mut cands: Vec<String> = candidates
             .iter()
             .take(8)
-            .map(|(w, s)| format!("{{\"t\":{},\"s\":{:.3}}}", json_str(w), score(*s)))
+            .map(|(w, s)| format!("{{\"t\":{},\"s\":{:.3},\"r\":{:.3}}}", json_str(w), score(*s), right_score(w)))
             .collect();
-        cands.push(format!("{{\"t\":{},\"keep\":true,\"s\":{:.3}}}", json_str(&shown), score(typed_score)));
+        cands.push(format!("{{\"t\":{},\"keep\":true,\"s\":{:.3},\"r\":{:.3}}}", json_str(&shown), score(typed_score), right_score(&shown)));
         let list = |words: &[String]| words.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(",");
         let id = format!("{set}-{n}");
         let line = format!(

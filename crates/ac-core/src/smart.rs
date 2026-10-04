@@ -580,6 +580,29 @@ impl SmartCorrector {
         Some(Ranking { typed, candidates })
     }
 
+    /// Diagnostics: ln probability of the words that follow `candidate`, given it and
+    /// the words before (Kneser-Ney chain). Right context is what a delayed correction
+    /// would have; the app does not have it when it decides. Words outside the lexicon
+    /// cost a flat penalty. `vietnamese` picks the language tables.
+    pub fn right_context_score(&self, vietnamese: bool, history: &[&str], candidate: &str, right: &[String]) -> f64 {
+        let (lexicon, kn) = if vietnamese { (&self.vi, &self.vi_kn) } else { (&self.en, &self.en_kn) };
+        if right.is_empty() || kn.is_empty() {
+            return 0.0;
+        }
+        let mut ids: Vec<Option<u32>> = history.iter().rev().take(2).rev().map(|w| lexicon.id(&w.to_lowercase())).collect();
+        ids.push(lexicon.id(&candidate.to_lowercase()));
+        let prefix = ids.len();
+        ids.extend(right.iter().map(|w| lexicon.id(&w.to_lowercase())));
+        let mut total = 0.0;
+        for k in prefix..ids.len() {
+            total += match (ids[k], ids[k - 1]) {
+                (Some(word), Some(prev)) => kn.ln_prob(if k >= 2 { ids[k - 2] } else { None }, prev, word),
+                _ => -16.0,
+            };
+        }
+        total
+    }
+
     /// Diagnostics: what the word after `candidate` says for it, as the
     /// ln likelihood ratio of that pair against the word on its own. This is
     /// context the app never has when it decides (the word is not typed yet).

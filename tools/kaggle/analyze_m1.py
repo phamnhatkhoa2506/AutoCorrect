@@ -16,7 +16,7 @@ import random
 import sys
 from collections import defaultdict
 
-METHODS = ("ngram", "teacher_left", "teacher_full")
+METHODS = ("ngram", "ngram_right", "teacher_left", "teacher_full")
 
 
 def load(export_path, scores_path):
@@ -38,6 +38,8 @@ def load(export_path, scores_path):
 def methods(sample):
     return {
         "ngram": [c["s"] for c in sample["candidates"]],
+        # n-gram score plus the n-gram probability of the words that follow (needs the `r` field)
+        "ngram_right": [c["s"] + c.get("r", 0.0) for c in sample["candidates"]],
         "teacher_left": sample["teacher"]["ll_left"],
         "teacher_full": sample["teacher"]["ll_full"],
     }
@@ -88,7 +90,7 @@ def main():
 
     rows = []
     print("Share of samples where the method picks the right candidate (only samples whose answer is a candidate)")
-    print(f"{'set':3} {'class':10} {'n':>6} {'cover':>6}  {'ngram':>6} {'t.left':>7} {'t.full':>7}   left-ngram (95% CI)")
+    print(f"{'set':3} {'class':10} {'n':>6} {'cover':>6}  {'ngram':>6} {'ng+right':>8} {'t.left':>7} {'t.full':>7}   left-ngram (95% CI)")
     for (set_name, cls), group in sorted(by_group.items()):
         usable = [s for s in group if truth_index(s) is not None]
         if not usable:
@@ -102,7 +104,7 @@ def main():
         lo, hi = bootstrap_diff(list(zip(hits["teacher_left"], hits["ngram"])))
         cover = len(usable) / len(group)
         print(
-            f"{set_name:3} {cls:10} {len(usable):6} {cover:6.1%}  {acc['ngram']:6.1%} {acc['teacher_left']:7.1%} "
+            f"{set_name:3} {cls:10} {len(usable):6} {cover:6.1%}  {acc['ngram']:6.1%} {acc['ngram_right']:8.1%} {acc['teacher_left']:7.1%} "
             f"{acc['teacher_full']:7.1%}   {acc['teacher_left'] - acc['ngram']:+.1%} ({lo:+.1%}, {hi:+.1%})"
         )
         rows.append(["accuracy", set_name, cls, len(usable), round(cover, 4)] + [round(acc[m], 4) for m in METHODS] + [round(lo, 4), round(hi, 4)])
