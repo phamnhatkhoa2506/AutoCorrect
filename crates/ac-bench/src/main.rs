@@ -704,6 +704,56 @@ fn run_delayed(corrector: &SmartCorrector, cases: &[Case], right_typo: f64, lang
     );
 }
 
+/// The hindsight check on corrections the immediate stage made: with the word that
+/// followed, which of them would be taken back, and were they wrong or right?
+fn run_audit(corrector: &SmartCorrector, cases: &[Case], right_typo: f64, language: Language) {
+    let mut rng = Rng(0x1F83_D9AB_FB41_BD6B);
+    // [fixes made, wrong fixes, wrong taken back, right fixes, right taken back]
+    let mut typos = [0u32; 5];
+    // [clean words, changed, changed and taken back]
+    let mut clean = [0u32; 3];
+    for case in cases {
+        let history: Vec<&str> = case.word.history.iter().map(String::as_str).collect();
+        let keys = match &case.typed {
+            None => typed_as(&case.word.keys, case.word.capital),
+            Some(x) => typed_as(x, case.word.capital),
+        };
+        let fix = corrector.correct_in(&keys, &history);
+        let right: Vec<String> = case.word.right.iter().take(1).map(|w| noisy_word(w, language, right_typo, &mut rng)).collect();
+        let back = fix.as_ref().is_some_and(|f| corrector.audit(&keys, f, &history, &right));
+        if case.typed.is_none() {
+            clean[0] += 1;
+            if fix.as_ref().is_some_and(|f| f.to_lowercase() != case.word.text) {
+                clean[1] += 1;
+                clean[2] += u32::from(back);
+            }
+        } else if let Some(f) = &fix {
+            typos[0] += 1;
+            if f.to_lowercase() == case.word.text {
+                typos[3] += 1;
+                typos[4] += u32::from(back);
+            } else {
+                typos[1] += 1;
+                typos[2] += u32::from(back);
+            }
+        }
+    }
+    let pct = |part: u32, whole: u32| 100.0 * f64::from(part) / f64::from(whole.max(1));
+    println!("  hindsight check with the next word (typo rate in that word {right_typo})");
+    println!(
+        "    corrections of typos: {} made; wrong {} -> {} after (taken back {}, {:.0}% of the wrong ones); right {} -> {} (lost {}, {:.1}% of the right ones)",
+        typos[0], typos[1], typos[1] - typos[2], typos[2], pct(typos[2], typos[1]), typos[3], typos[3] - typos[4], typos[4], pct(typos[4], typos[3])
+    );
+    println!(
+        "    correct words {}: changed {} ({:.2} per 1000) -> {} ({:.2} per 1000) after",
+        clean[0],
+        clean[1],
+        1000.0 * f64::from(clean[1]) / f64::from(clean[0].max(1)),
+        clean[1] - clean[2],
+        1000.0 * f64::from(clean[1] - clean[2]) / f64::from(clean[0].max(1))
+    );
+}
+
 fn json_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -834,6 +884,7 @@ fn main() {
         bigram_weight: flag("--weight", d.bigram_weight),
         trigram_weight: flag("--tri", d.trigram_weight),
         kn: flag("--kn", f64::from(u8::from(d.kn))) > 0.0,
+        audit_margin: flag("--audit-margin", d.audit_margin),
         revise_margin: flag("--revise-margin", d.revise_margin),
         revise_margin_x: flag("--revise-margin-x", d.revise_margin_x),
         revise_ambiguity: flag("--revise-amb", d.revise_ambiguity),
@@ -942,6 +993,11 @@ fn main() {
                 Case { word, typed, bare: false }
             })
             .collect();
+        if args.iter().any(|a| a == "--audit") {
+            corrector.set_context(true);
+            println!("\n== {name} ==");
+            run_audit(&corrector, &cases, flag("--right-typo", 0.0), language);
+        }
         if args.iter().any(|a| a == "--delayed") {
             corrector.set_context(true);
             println!("\n== {name} ==");

@@ -79,6 +79,10 @@ pub struct Tuning {
     pub revise_margin_x: f64,
     /// ...and how far it must beat the second best.
     pub revise_ambiguity: f64,
+    /// Hindsight check of a correction already made (see [`SmartCorrector::audit`]): the
+    /// word as typed must fit the word after it better than the fix, by this much, for
+    /// the fix to be taken back.
+    pub audit_margin: f64,
     /// Penalty for a candidate of the other language than the previous word
     /// (an English word after an English word is more likely English).
     pub language_penalty: f64,
@@ -122,6 +126,7 @@ impl Default for Tuning {
             revise_margin: 8.0,
             revise_margin_x: 12.0,
             revise_ambiguity: 3.0,
+            audit_margin: 4.0,
             language_penalty: 3.0,
             phrase_decay: 0.7,
             restore_margin: 6.5,
@@ -593,6 +598,38 @@ impl SmartCorrector {
         (top_score - keep >= margin && top_score - second >= self.tuning.revise_ambiguity).then(|| match_case(word, &top))
     }
 
+    /// Hindsight check of a correction already made: with the word that followed, is
+    /// the word as typed a better fit than `fix`? True means take the fix back.
+    /// Independent of how the fix was found: it only compares the two readings, each
+    /// with the words before it and the words after it. Not used by the app yet.
+    pub fn audit(&self, word: &str, fix: &str, history: &[&str], right: &[String]) -> bool {
+        if right.is_empty() {
+            return false;
+        }
+        let Some(keys) = Self::keys_of(word) else { return false };
+        let capital = word.chars().next().is_some_and(char::is_uppercase);
+        let (_, vietnamese) = self.typed(&keys);
+        let shown = vietnamese.clone().unwrap_or_else(|| keys.clone());
+        let bare = self.vietnamese && self.restore && !capital && compose(&keys).text == keys;
+        let ranking = if bare { self.rank_bare(&keys, history) } else { self.rank_in(word, history) };
+        let Some(ranking) = ranking else { return false };
+        let fix_lower = fix.to_lowercase();
+        let in_base = ranking.candidates.iter().find(|(w, _)| w.to_lowercase() == fix_lower).map(|c| c.1);
+        let fix_score = in_base.or_else(|| {
+            let expanded = if vietnamese.is_some() { self.rank_expanded(word, history) } else { None };
+            expanded.and_then(|r| r.candidates.into_iter().find(|(w, _)| w.to_lowercase() == fix_lower).map(|c| c.1))
+        });
+        let Some(fix_score) = fix_score else { return false };
+        let after = |text: &str| {
+            let vi = self.vietnamese && self.vi.id(&text.to_lowercase()).is_some();
+            self.right_context_score(vi, history, text, right)
+        };
+        let finite = |s: f64| if s.is_finite() { s } else { -99.0 };
+        let original = finite(ranking.typed) + after(&shown);
+        let fixed = finite(fix_score) + after(fix);
+        original - fixed >= self.tuning.audit_margin
+    }
+
     /// For the hard-case journal: a word left alone although it had a close
     /// alternative. Returns a short note ("best score | next score | typed
     /// score"), or `None` when the word is plainly fine or has no plausible
@@ -953,6 +990,18 @@ mod tests {
         // An English slip after an English word is an English word: launch, never anh.
         assert_eq!(c.correct_after("launh", Some("pioneering")).as_deref(), Some("launch"));
         assert_ne!(c.correct_after("ays", Some("three")).as_deref(), Some("ấy"));
+    }
+
+    /// What "namk" becomes with and without the word before it: `cargo test -p ac-core probe_namk -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn probe_namk() {
+        let c = corrector();
+        for history in [vec![], vec!["việt"], vec!["nhất", "việt"], vec!["tiếng", "hay", "nhất", "việt"]] {
+            let r = c.rank_in("namk", &history);
+            let top: Vec<String> = r.iter().flat_map(|r| r.candidates.iter().take(4)).map(|(w, s)| format!("{w} {s:.1}")).collect();
+            println!("{:<30} -> {:<10} typed {:>6.1} {top:?}", history.join(" "), format!("{:?}", c.correct_in("namk", &history)), r.as_ref().map_or(f64::NAN, |r| r.typed));
+        }
     }
 
     /// Delayed revision: the word after it settles what a word could not say alone.
