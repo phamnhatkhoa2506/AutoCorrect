@@ -17,6 +17,7 @@ struct Options {
     journal: bool,
     journal_edits: bool,
     journal_hard: bool,
+    journal_right: bool,
     delayed: bool,
     code_english: bool,
     autocomplete_guard: bool,
@@ -72,6 +73,7 @@ fn options_of(s: &Settings) -> Options {
         journal: s.journal,
         journal_edits: s.journal_edits,
         journal_hard: s.journal_hard,
+        journal_right: s.journal_right,
         delayed: s.delayed,
         code_english: s.code_english,
         autocomplete_guard: s.autocomplete_guard,
@@ -169,6 +171,7 @@ fn save_options(options: Options) -> Result<(), String> {
     s.journal = options.journal;
     s.journal_edits = options.journal_edits;
     s.journal_hard = options.journal_hard;
+    s.journal_right = options.journal_right;
     s.delayed = options.delayed;
     s.code_english = options.code_english;
     s.autocomplete_guard = options.autocomplete_guard;

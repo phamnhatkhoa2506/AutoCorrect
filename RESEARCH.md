@@ -149,6 +149,11 @@ phía phải mạnh (sửa muộn), và học cách chọn thay cho luật.
 Nhật ký trên máy (đếm ngày 2026-10-04, chỉ số tổng hợp): 97 dòng, gồm 92 `FIX` và 5 `LATE`;
 50 ở nhóm `Normal`, 42 ở nhóm `Code`; không có dòng hoàn tác hay sửa tay.
 
+**Định dạng mới (2026-10-05):** mỗi dòng nay có thêm cột `left` (mọi từ trước, tối đa 4) và `right` (tối đa 3 từ
+gõ sau đó, cần bật `journal_right`, mặc định tắt). Dòng nhật ký chờ các từ sau rồi mới ghi; chi tiết điều kiện chờ
+ở `bench/README.md`. Dữ liệu này là đầu vào cho các đặc trưng ngữ cảnh phải của mô hình quyết định, và cho việc
+hiệu chỉnh sim. Dòng cũ vẫn đọc được (hai cột cuối trống).
+
 **Hệ quả:** nhật ký hiện chỉ ghi những lỗi app **đã sửa được**. Lỗi app bỏ sót không để lại dấu vết,
 nên dùng nó để hiệu chỉnh người gõ sẽ lặp lại đúng thiên lệch của #12. Nguồn lỗi bỏ sót là việc bạn
 tự sửa tay (Backspace vào từ rồi gõ lại), đã được engine bắt nhưng chỉ ghi khi bật `journal_edits`.

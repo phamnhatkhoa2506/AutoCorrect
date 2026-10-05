@@ -170,6 +170,9 @@ pub struct Engine<C: Corrector> {
     /// A word finished differently from how it was before the user went back
     /// into it: (before, after). Taken by the platform layer for the journal.
     manual_edit: Option<(String, String)>,
+    /// The word the last boundary ended, as it stands on screen after any fix
+    /// (taken by the platform layer for the journal's right-hand context).
+    finished: Option<String>,
     last: Option<LastCorrection>,
     /// Keys of the word just restored by an undo: finishing it unchanged
     /// keeps it as is.
@@ -201,6 +204,7 @@ impl<C: Corrector> Engine<C> {
             delayed: false,
             pending: None,
             manual_edit: None,
+            finished: None,
             last: None,
             just_undone: None,
             undos: HashMap::new(),
@@ -296,6 +300,23 @@ impl<C: Corrector> Engine<C> {
     }
 
     /// A word the user went back into and changed by hand: (before, after).
+    /// The word a space or punctuation just ended, as it is on screen (after a fix,
+    /// the fixed text), or `None` if nothing was known about it. Handed out once.
+    pub fn take_finished(&mut self) -> Option<String> {
+        self.finished.take()
+    }
+
+    /// The words before what the last correction replaced, oldest first (the ones
+    /// the corrector saw as context). For a revision that is the words before the
+    /// first of the two it rewrote.
+    pub fn last_correction_left(&self) -> Vec<String> {
+        let Some(last) = &self.last else { return Vec::new() };
+        if last.second.is_some() {
+            return last.earlier.clone();
+        }
+        last.earlier.iter().cloned().chain(last.context.clone()).collect()
+    }
+
     pub fn take_manual_edit(&mut self) -> Option<(String, String)> {
         self.manual_edit.take()
     }
@@ -452,6 +473,7 @@ impl<C: Corrector> Engine<C> {
             }
         };
         let final_shown = immediate.clone().unwrap_or_else(|| word.shown.clone());
+        self.finished = (!word.keys.is_empty() && !untracked).then(|| final_shown.clone());
 
         // Delayed revision: the word before, left alone when it was typed, looked at
         // again now that the word after it is known.
@@ -820,6 +842,23 @@ mod tests {
         type_str(&mut e, "the");
         assert_eq!(e.on_key(Key::Punct(',')), Action::Pass);
         assert_eq!(e.on_key(Key::Punct(',')), Action::Pass);
+    }
+
+    #[test]
+    fn the_ended_word_and_the_words_before_a_fix_can_be_read() {
+        let mut e = engine();
+        type_str(&mut e, "abc");
+        e.on_key(Key::Space);
+        assert_eq!(e.take_finished().as_deref(), Some("abc"));
+        assert_eq!(e.take_finished(), None); // handed out once
+        type_str(&mut e, "teh");
+        e.on_key(Key::Space);
+        // What is on screen after the fix, and what came before the fixed word.
+        assert_eq!(e.take_finished().as_deref(), Some("the"));
+        assert_eq!(e.last_correction_left(), ["abc"]);
+        // An empty boundary ends no word.
+        e.on_key(Key::Space);
+        assert_eq!(e.take_finished(), None);
     }
 
     #[test]

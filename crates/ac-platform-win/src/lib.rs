@@ -7,6 +7,7 @@ pub use ac_core::Personal;
 pub mod focus;
 pub mod hook;
 pub mod inject;
+pub mod journal;
 pub mod log;
 pub mod settings;
 pub mod tray;

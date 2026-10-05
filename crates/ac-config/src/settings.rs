@@ -81,6 +81,9 @@ pub struct Settings {
     pub journal_edits: bool,
     /// Also journal hard cases the app left alone (close candidates).
     pub journal_hard: bool,
+    /// Keep each journal line until the next few words are typed, and write them
+    /// in it (the context to the right of the word). Off: the line is written at once.
+    pub journal_right: bool,
     /// Revise a word once the next one is typed ("that là" -> "thật là"). Experimental.
     pub delayed: bool,
     /// Correct English in terminals and IDEs too (off: only Vietnamese there,
@@ -105,6 +108,7 @@ impl Default for Settings {
             journal: false,
             journal_edits: false,
             journal_hard: false,
+            journal_right: false,
             delayed: false,
             code_english: false,
             autocomplete_guard: true,
@@ -130,6 +134,7 @@ impl Settings {
                 "journal" => s.journal = on,
                 "journal_edits" => s.journal_edits = on,
                 "journal_hard" => s.journal_hard = on,
+                "journal_right" => s.journal_right = on,
                 "delayed" => s.delayed = on,
                 "code_english" => s.code_english = on,
                 "autocomplete_guard" => s.autocomplete_guard = on,
@@ -146,13 +151,14 @@ impl Settings {
     pub fn to_ini(&self) -> String {
         let flag = |b: bool| u8::from(b);
         format!(
-            "vietnamese={}\ncorrections={}\npaused={}\njournal={}\njournal_edits={}\njournal_hard={}\ndelayed={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\nhotkey={}\nstrength={}\ninput={}\n",
+            "vietnamese={}\ncorrections={}\npaused={}\njournal={}\njournal_edits={}\njournal_hard={}\njournal_right={}\ndelayed={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\nhotkey={}\nstrength={}\ninput={}\n",
             flag(self.vietnamese),
             flag(self.corrections),
             flag(self.paused),
             flag(self.journal),
             flag(self.journal_edits),
             flag(self.journal_hard),
+            flag(self.journal_right),
             flag(self.delayed),
             flag(self.code_english),
             flag(self.autocomplete_guard),
@@ -191,6 +197,7 @@ mod tests {
             journal: true,
             journal_edits: true,
             journal_hard: true,
+            journal_right: true,
             delayed: true,
             hotkey: Hotkey::parse("Ctrl+Shift").unwrap(),
             strength: Strength::Bold,

@@ -21,6 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::focus;
 use crate::inject::{self, Job, JobKind, INJECTED_TAG};
+use crate::journal::{Entry, Journal};
 use crate::log;
 use ac_config::{AppKind, Apps, Detector, Hotkey, Outcome};
 use ac_core::Tuning;
@@ -46,12 +47,22 @@ struct State {
     settings_stamp: Option<std::time::SystemTime>,
     /// Since when keys pass untouched because a password field has focus, and how many.
     hands_off_since: Option<(Instant, u32)>,
+    /// Journal lines waiting for the words typed after them (see `journal.rs`).
+    journal: Journal,
     /// Keys typed while the focus check was pending (not composed), since the last log line.
     observed_keys: u32,
     observed_logged: Option<Instant>,
 }
 
 impl State {
+    /// Writes the journal lines that wait for words still to come: the text around
+    /// them is about to be lost.
+    fn flush_journal(&mut self) {
+        let mut lines = Vec::new();
+        self.journal.flush(&mut lines);
+        lines.into_iter().for_each(log::journal);
+    }
+
     /// Pushes the settings and the foreground app's policy into the engine.
     fn apply(&mut self) {
         let s = self.settings;
@@ -68,6 +79,9 @@ impl State {
         // Terminals and code would have identifiers rewritten.
         self.engine.set_restore_marks(s.corrections && s.restore_marks && self.app == AppKind::Normal);
         self.engine.corrector_mut().set_tuning(Tuning::preset(s.strength.level()));
+        let mut lines = Vec::new();
+        self.journal.set_wait_for_right(s.journal && s.journal_right, &mut lines);
+        lines.into_iter().for_each(log::journal);
         if self.detector.hotkey() != s.hotkey {
             self.detector.set_hotkey(s.hotkey);
         }
@@ -143,6 +157,7 @@ thread_local! {
         apps_stamp: None,
         settings_stamp: None,
         hands_off_since: None,
+        journal: Journal::default(),
         observed_keys: 0,
         observed_logged: None,
     });
@@ -182,6 +197,16 @@ pub fn set_personal(personal: Personal) {
         state.personal_stamp = crate::settings::personal_path()
             .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
         state.engine.corrector_mut().set_personal(personal);
+    });
+}
+
+/// Writes the journal lines that still wait for the words after them (a click, or
+/// the app quitting).
+pub fn flush_journal() {
+    STATE.with(|cell| {
+        if let Ok(mut state) = cell.try_borrow_mut() {
+            state.flush_journal();
+        }
     });
 }
 
@@ -281,6 +306,7 @@ pub unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPAR
     {
         // A click may move the caret: the buffered word no longer matches the screen.
         with_engine(|e| e.on_key(Key::Reset));
+        flush_journal();
     }
     CallNextHookEx(None, code, wparam, lparam)
 }
@@ -330,6 +356,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         };
         if state.hands_off() {
             // Password field, paused, or a hands-off app: keep nothing.
+            state.flush_journal();
             if focus::password() && state.hands_off_since.is_none() {
                 state.hands_off_since = Some((Instant::now(), 0));
                 log::event(format!("hands off: a password field has focus ({})", state.process));
@@ -351,6 +378,7 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             state.reload_files();
             state.classify_process(&name);
             state.engine.on_key(Key::Reset);
+            state.flush_journal();
             state.detector.reset();
             if state.hands_off() {
                 return None;
@@ -377,15 +405,33 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         let pending = state.engine.last_correction().map(|(k, f)| (k.to_string(), f.to_string()));
         let late_before = state.engine.last_was_revision();
         let history = state.engine.history();
+        // The words before what an undo is about to take back.
+        let undo_left = if key == Key::Undo { state.engine.last_correction_left() } else { Vec::new() };
         let action = state.engine.on_key(key);
         let guard = state.guard && state.settings.autocomplete_guard;
+        let now = Instant::now();
+        let app_name = format!("{:?}", state.app);
+        let sentence_end = matches!(key, Key::Punct('.' | '!' | '?'));
+        // Journal lines to write after this key (see `journal.rs`).
+        let mut lines: Vec<String> = Vec::new();
+        state.journal.expire(now, &mut lines);
+        if key == Key::Reset {
+            state.journal.flush(&mut lines);
+        }
+        // The word that ended is the right-hand context of the lines waiting from before
+        // (not of the one this key adds below).
+        let finished = state.engine.take_finished();
+        if let Some(word) = &finished {
+            state.journal.word_finished(word, sentence_end, &mut lines);
+        }
         // Hand-made fixes and hard cases, for learning: opt-in, never in
         // terminals/IDEs (hands-off apps and passwords never get this far).
         let edit = state.engine.take_manual_edit();
         if state.app == AppKind::Normal {
             let mode = if state.engine.is_vietnamese() { "vi" } else { "en" };
             if let (true, Some((from, to))) = (state.settings.journal_edits, edit) {
-                log::journal(format!("EDIT\t{from}\t{to}\t{}\t{mode}\t{:?}", history.join(" "), state.app));
+                let entry = Entry { kind: "EDIT", keys: from, fix: to, mode, app: app_name.clone(), left: history.clone(), right: Vec::new() };
+                state.journal.add(entry, now, &mut lines);
             }
             let telex = state.settings.input == ac_config::InputMethod::Telex;
             if state.settings.journal_hard
@@ -396,7 +442,8 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
             {
                 let words: Vec<&str> = history.iter().map(String::as_str).collect();
                 if let Some(note) = state.engine.corrector_mut().near_miss(&keys, &words) {
-                    log::journal(format!("NEAR\t{keys}\t{note}\t{}\t{mode}\t{:?}", history.join(" "), state.app));
+                    let entry = Entry { kind: "NEAR", keys: keys.clone(), fix: note, mode, app: app_name.clone(), left: history.clone(), right: Vec::new() };
+                    state.journal.add(entry, now, &mut lines);
                 }
             }
         }
@@ -408,16 +455,27 @@ unsafe fn on_key_down(kb: &KBDLLHOOKSTRUCT) -> bool {
         if state.settings.journal && matches!(action, Action::Replace { .. } | Action::ReplaceThenPass { .. }) {
             let entry = match key {
                 Key::Space | Key::Punct(_) | Key::Close(_) => {
-                    let kind = if state.engine.last_was_revision() { "LATE" } else { "FIX" };
-                    state.engine.last_correction().map(|(k, f)| (kind, k.to_string(), f.to_string()))
+                    let late = state.engine.last_was_revision();
+                    // A revision rewrote two words: the second is the right-hand context of the first.
+                    let right = if late { finished.clone().into_iter().collect() } else { Vec::new() };
+                    state.engine.last_correction().map(|(k, f)| {
+                        (if late { "LATE" } else { "FIX" }, k.to_string(), f.to_string(), state.engine.last_correction_left(), right)
+                    })
                 }
-                Key::Undo => pending.map(|(k, f)| (if late_before { "UNDO-LATE" } else { "UNDO" }, k, f)),
+                Key::Undo => pending.map(|(k, f)| (if late_before { "UNDO-LATE" } else { "UNDO" }, k, f, undo_left, Vec::new())),
                 _ => None,
             };
-            if let Some((kind, keys, fix)) = entry {
+            if let Some((kind, keys, fix, left, right)) = entry {
                 let mode = if state.engine.is_vietnamese() { "vi" } else { "en" };
-                log::journal(format!("{kind}\t{keys}\t{fix}\t{}\t{mode}\t{:?}", context.as_deref().unwrap_or(""), state.app));
+                state.journal.add(Entry { kind, keys, fix, mode, app: app_name.clone(), left, right }, now, &mut lines);
             }
+        }
+        // The text after a full stop is another sentence: nothing waits across it.
+        if sentence_end {
+            state.journal.flush(&mut lines);
+        }
+        for line in lines {
+            log::journal(line);
         }
         if matches!(key, Key::Space | Key::Punct(_) | Key::Close(_)) && log::debug_enabled() {
             let decision = state.engine.last_decision();

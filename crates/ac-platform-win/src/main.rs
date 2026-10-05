@@ -130,6 +130,10 @@ fn main() -> Result<()> {
             DispatchMessageW(&msg);
         }
 
+        // Journal lines still waiting for the words after them are written now. The log
+        // thread writes them off-thread: give it a moment before the process ends.
+        hook::flush_journal();
+        std::thread::sleep(std::time::Duration::from_millis(200));
         tray::remove();
         let (keyboard, mouse) = HOOKS.with(Cell::get);
         let _ = UnhookWindowsHookEx(keyboard);

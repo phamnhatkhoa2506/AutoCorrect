@@ -577,35 +577,38 @@ fn golden(corrector: &mut SmartCorrector, path: &Path) -> bool {
 fn journal_cases(journal: &Path, out: &Path) {
     use std::collections::BTreeSet;
     let text = fs::read_to_string(journal).unwrap_or_default();
-    // (keys, fix, context, mode, app)
-    type Entry = (String, String, String, String, String);
+    // (keys, fix, context, mode, app, right). The context is all the words before when
+    // the journal has them (the `left` column), else the one word before.
+    type Entry = (String, String, String, String, String, String);
     let mut entries: Vec<(bool, Entry)> = Vec::new(); // (undone, entry)
     let mut undone_pairs: BTreeSet<(String, String)> = BTreeSet::new();
     for line in text.lines() {
         let f: Vec<&str> = line.split('\t').collect();
         let [_, kind, keys, fix, rest @ ..] = &f[..] else { continue };
         let (kind, keys, fix) = (*kind, *keys, *fix);
-        let context = rest.first().copied().unwrap_or("").to_string();
+        let left = rest.get(3).copied().filter(|l| !l.is_empty());
+        let context = left.or(rest.first().copied()).unwrap_or("").to_string();
+        let right = rest.get(4).copied().unwrap_or("").to_string();
         let mode = rest.get(1).copied().filter(|m| !m.is_empty()).map_or_else(|| if fix.is_ascii() { "en" } else { "vi" }, |m| m).to_string();
         let app = rest.get(2).copied().unwrap_or("Normal").to_string();
         if kind == "UNDO" {
             undone_pairs.insert((keys.to_string(), fix.to_string()));
         }
         if kind == "FIX" || kind == "UNDO" {
-            entries.push((kind == "UNDO", (keys.to_string(), fix.to_string(), context, mode, app)));
+            entries.push((kind == "UNDO", (keys.to_string(), fix.to_string(), context, mode, app, right)));
         }
     }
     let mut seen: BTreeSet<Entry> = BTreeSet::new();
-    let mut rows = vec!["id\tgroup\tmode\tcontext\ttyped\texpected\tlevel\tsource\tnote".to_string()];
+    let mut rows = vec!["id\tgroup\tmode\tcontext\ttyped\texpected\tlevel\tsource\tnote\tright".to_string()];
     for (_, entry) in &entries {
         if !seen.insert(entry.clone()) {
             continue;
         }
-        let (keys, fix, context, mode, app) = entry;
+        let (keys, fix, context, mode, app, right) = entry;
         let rejected = undone_pairs.contains(&(keys.clone(), fix.clone()));
         let mode = if app == "Code" && mode == "vi" { "code" } else { mode.as_str() };
         let (group, expected, level) = if rejected { ("journal-undone", "=", "goal") } else { ("journal-kept", fix.as_str(), "must") };
-        rows.push(format!("j{:03}\t{group}\t{mode}\t{context}\t{keys}\t{expected}\t{level}\tjournal\t{app}", rows.len()));
+        rows.push(format!("j{:03}\t{group}\t{mode}\t{context}\t{keys}\t{expected}\t{level}\tjournal\t{app}\t{right}", rows.len()));
     }
     // Words you went back into and fixed by hand: the right answer is what you wrote.
     let mut seen_edits: BTreeSet<(String, String, String)> = BTreeSet::new();
@@ -615,13 +618,16 @@ fn journal_cases(journal: &Path, out: &Path) {
         if *kind != "EDIT" {
             continue;
         }
-        let context = rest.first().copied().unwrap_or("");
+        // All the words before (the `left` column) when the journal has them. For an
+        // EDIT line written before that column existed, the fourth column is the same.
+        let context = rest.get(3).copied().filter(|l| !l.is_empty()).or(rest.first().copied()).unwrap_or("");
+        let right = rest.get(4).copied().unwrap_or("");
         let mode = rest.get(1).copied().unwrap_or("vi");
         let typed = if mode == "vi" { to_keys(from) } else { (*from).to_string() };
         if !seen_edits.insert((typed.clone(), (*to).to_string(), context.to_string())) {
             continue;
         }
-        rows.push(format!("j{:03}\tjournal-edit\t{mode}\t{context}\t{typed}\t{to}\tgoal\tjournal\tmanual edit", rows.len()));
+        rows.push(format!("j{:03}\tjournal-edit\t{mode}\t{context}\t{typed}\t{to}\tgoal\tjournal\tmanual edit\t{right}", rows.len()));
     }
     fs::write(out, rows.join("\n") + "\n").expect("write cases");
     println!("{} cases from {} journal lines -> {}", rows.len() - 1, entries.len(), out.display());

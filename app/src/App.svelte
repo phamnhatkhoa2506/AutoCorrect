@@ -248,6 +248,9 @@
           <label><input type="checkbox" bind:checked={options.journal_hard} onchange={saveOptions} />
             <span>Ghi ca khó app bỏ qua
               <small>Từ gõ, 3 từ trước đó và điểm các ứng viên gần nhau. Không ghi trong terminal/IDE. Tối đa 8 MB. Mặc định tắt.</small></span></label>
+          <label><input type="checkbox" bind:checked={options.journal_right} onchange={saveOptions} />
+            <span>Ghi cả các từ gõ sau đó
+              <small>Mỗi dòng nhật ký chờ thêm tối đa 3 từ bạn gõ tiếp (hoặc 60 giây, Enter, đổi cửa sổ) để lưu cả ngữ cảnh phía sau. Nhật ký chứa nhiều văn bản bạn gõ hơn; vẫn chỉ lưu trên máy này. Mặc định tắt.</small></span></label>
           <label><input type="checkbox" bind:checked={autostart} onchange={saveAutostart} />
             <span>Khởi động cùng Windows</span></label>
         </section>
