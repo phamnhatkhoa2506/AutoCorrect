@@ -33,6 +33,7 @@ Giải pháp có thể: ...
 | 15 | Tiếng Anh gõ ở chế độ Việt không bao giờ được sửa lại (`of` → `ò`) | Mở |
 | 16 | Sửa muộn đổi `that` trong câu tiếng Anh thành `thật` | Mở |
 | 17 | Thiếu dấu cách giữa hai hoặc nhiều từ (`quanheej` → `quan hệ`) | Đang sửa (bản đầu có, sửa đúng 53% với 2 từ) |
+| 18 | Bộ tách cắt nhầm từ mượn (`canxi` → `can xi`) | Mở |
 
 ---
 
@@ -256,3 +257,15 @@ Trạng thái: Đang sửa | Nguồn: bạn đề xuất, 2026-10-04; đo bằng
 - Chặn ngay: không để bộ sửa hiện tại "sửa" chuỗi dính thành một từ làm mất chữ (`toanfan` → `toàn`).
 
 **Cập nhật (2026-10-04): bản đầu của bộ tách (`smart/split.rs`).** Sửa đúng 53% với 2 từ dính, 41% với 3, 20% với 4, 12% với 5 (trước đó 0%). Giữ ngưỡng chặt nên chưa tìm được hết; chi tiết và đánh đổi ở RESEARCH.md mục 3.2. Còn lại: lỗi gõ bên trong chuỗi dính, sửa muộn khi ranh giới yếu, và học cách chọn; từ nước ngoài hoặc tên riêng tình cờ tách được vẫn là rủi ro khi hạ ngưỡng.
+
+---
+
+## #18. Bộ tách cắt nhầm từ mượn
+Trạng thái: Mở | Nguồn: `ac-bench --viwiki`, 2026-10-05 | Liên quan: #17
+
+**Mô tả:** Trên văn bản Wikipedia về hóa học và địa chất, bộ tách âm tiết (`smart/split.rs`) cắt các từ mượn không có trong từ vựng thành hai âm tiết hợp lệ: `canxi` → `can xi`, `magiê` → `ma giê`, `natri` → `na tri`, `halua` → `ha lua`, `bari` → `bài`. Trong `ac-sim` (câu thường) lỗi này ít lộ vì từ vựng chung không chứa nhiều từ kiểu này; trên văn bản chuyên ngành nó thành sửa nhầm lặp lại. Số liệu: số từ bị đổi mà không có chú thích tăng từ 1,12 lên 1,29 trên 1000 từ khi bật bộ tách, precision của cả hai giảm từ 30,5% xuống 27,4% (RESEARCH.md mục 3.3). Một phần có thể là lỗi thật chưa chú thích.
+
+**Giải pháp có thể (chưa thử):**
+- Hạ độ nhạy với từ chuyên ngành: tăng `split_lift` hoặc đòi thêm bằng chứng cho đoạn ngắn (5 đến 6 phím), vì ca đúng điển hình (`quanheej`) dài hơn. Đánh đổi sẽ đo bằng `ac-sim --join` (độ phủ) và `--viwiki` (sửa nhầm) cùng lúc.
+- Chặn theo hình dạng: từ kết thúc bằng đuôi quen của tên chất hoặc từ mượn (`-xi`, `-ri`, `-ua`...), hoặc chuỗi lặp lại nhiều lần trong cùng văn bản (một từ hợp lệ thật không nên bị cắt khác nhau, và một từ lạ xuất hiện nhiều lần thường là từ thật).
+- Về lâu dài: để mô hình quyết định học (đặc trưng gồm độ dài chuỗi, tần suất đã thấy trong phiên, lĩnh vực của ứng dụng).

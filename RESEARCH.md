@@ -144,6 +144,55 @@ sửa đúng 40,7% → 40,5%, sửa sai 6,9% → 7,4% (từ chuỗi "bỏ sót" 
 Chưa làm: lỗi gõ nằm bên trong chuỗi dính (`quanhejf`), cắt khi một ranh giới yếu (min lift) mà ngữ cảnh
 phía phải mạnh (sửa muộn), và học cách chọn thay cho luật.
 
+### 3.3 Bộ thử ngoài: Viwiki-Spelling (2026-10-05)
+
+Chạy bằng `cargo run -p ac-bench --release -- --viwiki [--docs N] [--show N]` (khoảng 6 phút cho cả bộ; ngưỡng
+chỉnh bằng các cờ `--revise-margin`, `--split-lift`...). Bộ dữ liệu: 107 bài Wikipedia, 458 366 từ, 1511 lỗi
+chú thích (Tran và cộng sự, 2021, CC BY 4.0). Lỗi là lỗi **thật** của người viết: 55% chỉ sai dấu hoặc thanh
+(`hát` thay `hán`), 41% sai một chữ, 2% về dấu cách. Mỗi từ được đưa cho bộ sửa như app thấy: có các từ trước
+trong cụm, và với sửa muộn có từ kế tiếp. "Đúng" là đổi thành một trong các đáp án đã chú thích.
+
+Giới hạn khi đọc số: đây là văn bản đã viết xong, không phải phím đã gõ; chỉ các lỗi được chú thích mới được
+tính, nên một từ bị đổi mà không có trong chú thích có thể là lỗi thật bị sót (ví dụ `bòng → bóng đèn` trông
+đúng), tức precision dưới đây bị đánh giá thấp. Định nghĩa precision, recall của ta (tính theo từ bị đổi) có
+thể khác của bài báo.
+
+| Cách chạy | Từ bị đổi | Precision (đúng) | Recall (đúng) | F1 | Đổi từ không chú thích, trên 1000 từ |
+|---|---|---|---|---|---|
+| Sửa tức thì | 627 | 21,4% | 8,9% | 12,5 | 1,05 |
+| Sửa muộn, ngưỡng mặc định (8 / 12) | 333 | 51,4% | 11,3% | 18,5 | 0,35 |
+| Sửa muộn, nới (5 / 8) | 515 | 52,6% | 17,9% | 26,8 | 0,53 |
+| Sửa muộn, nới nhiều (3 / 5) | 882 | 44,0% | 25,7% | 32,4 | 1,06 |
+| Cả hai như app (mặc định) | 831 | 27,4% | 15,1% | 19,5 | 1,29 |
+| Cả hai, nới nhiều | 1365 | 31,9% | 28,8% | 30,3 | 1,99 |
+
+Tham chiếu: bài báo báo precision 67%, recall 71%, F1 69% trên cùng loại bộ này, bằng một mô hình lớn có ngữ
+cảnh hai phía và được huấn luyện cho đúng việc đó. Ta thấp hơn nhiều ở recall, đúng như thiết kế: bộ sửa
+tức thì cố ý để nguyên từ đã hợp lệ. Sửa muộn là phần có cơ hội, và nới ngưỡng cho thêm recall nhưng precision
+tụt (đường đánh đổi ở mục 1.2).
+
+Theo loại lỗi (cả hai, mặc định): sai dấu hoặc thanh sửa đúng 21,8%, sai một chữ 6,9%, dấu cách 3,4%.
+
+Bộ tách âm tiết (mục 3.2) trên bộ này: tắt thì sửa dấu cách đúng 0%, bật thì 3,4%; nhưng số từ bị đổi mà không
+có chú thích tăng từ 1,12 lên 1,29 trên 1000 và precision cả hai giảm từ 30,5% xuống 27,4%. Phần tăng là các
+từ mượn khoa học bị cắt nhầm (`canxi → can xi`, `magiê → ma giê`, `halua → ha lua`, `natri → na tri`): hai âm
+tiết đều hợp lệ và đứng cạnh nhau, nhưng không phải hai từ. Xem `ISSUE.md` #18.
+
+### 3.4 Nguồn lỗi thật khác: VSEC (2026-10-05)
+
+`data/raw/vsec/VSEC.jsonl`: 9341 câu, 282 459 âm tiết, 11 202 lỗi được sửa tay, nhãn ở mức âm tiết, khoảng
+5000 cặp (lỗi, sửa) khác nhau. Mọi câu đều có ít nhất một lỗi (nên tỉ lệ 39,7 lỗi trên 1000 âm tiết cao hơn
+nhiều so với văn bản thường). Theo loại: sai dấu hoặc thanh 64,7%, sai một chữ 29,5%, một âm tiết thành nhiều
+(dính từ) 1,8%, khác 4,0%. Nhiều lỗi trông như trượt phím thật (`tranhh`, `cachh`, `hê` thay `hệ`, `iên` thay
+`nhiên`). Repo không ghi giấy phép, cách chia tập hay nguồn câu; một số cặp là biến thể đặt dấu (`thoả` và
+`thỏa`) chứ không hẳn lỗi, nên nhãn có nhiễu. Chưa có chia train/dev/test chính thức: ta sẽ tự chia theo câu.
+Dùng để: (a) hiệu chỉnh mô hình người gõ của `ac-sim` bằng tần suất kiểu lỗi thật (mốc R2); (b) huấn luyện
+và đo trên lỗi thật; (c) đo chéo: huấn luyện trên VSEC, đo trên Viwiki (mục 3.3). Không có chuỗi phím Telex,
+nên phần "phím nào bị gõ trượt" vẫn phải suy ra.
+
+`binhvq/news-corpus` (14,9 triệu bài báo): kho lưu trữ đã bị đóng từ tháng 8/2026, **không còn phát hành** và
+các liên kết tải đã bị gỡ; giấy phép MIT chỉ áp dụng cho mã, không cho bài báo. Không dùng được.
+
 ## 4. Dữ liệu thật: hiện có gì
 
 Nhật ký trên máy (đếm ngày 2026-10-04, chỉ số tổng hợp): 97 dòng, gồm 92 `FIX` và 5 `LATE`;
@@ -169,6 +218,155 @@ tự sửa tay (Backspace vào từ rồi gõ lại), đã được engine bắt
   đánh giá chính sách mới phải dùng đánh giá ngoài chính sách (off-policy), không đọc thẳng số liệu.
 - **Trọng tài cuối cùng:** tập lỗi thật giữ riêng (từ nhật ký, nếu được phép), không phải sim.
 
+## 5. Kế hoạch huấn luyện: thầy rồi trò (viết 2026-10-05)
+
+Mục tiêu: thay các ngưỡng viết tay bằng một mô hình học được, theo hướng "huấn luyện một mô hình lớn (thầy) rồi
+chưng cất ra mô hình nhỏ (trò) chạy trong app". Thầy chỉ chạy trên Kaggle; máy bạn chỉ chạy đo và suy luận nhẹ.
+
+**Quyết định hướng (2026-10-06): n-gram kết hợp mô hình học sâu do ta huấn luyện.** Không chọn giữa hai bên: n-gram
+là nền luôn bật, mạng nơ-ron học phần n-gram không làm được, và một bộ kết hợp học được thay cho các ngưỡng đặt tay.
+Căn cứ: bài báo Gupta (2019, mục 8) cho thấy hệ thống thời gian thực, thích ứng ngôn ngữ, chỉ dùng n-gram là khả thi
+(phát hiện khoảng 7 micro giây mỗi từ, sinh ứng viên và xếp hạng vài mili giây) nhưng chỉ xử lý lỗi "từ không có trong
+từ điển" và phải dò tay ba trọng số unigram, bigram, trigram, còn bài Tran và cộng sự (2021) cho thấy mô hình học sâu hai
+chiều làm tốt lỗi từ hợp lệ nhưng nặng và chạy trên văn bản đã gõ xong. Ta cần phần giữa của hai bên, trên chuỗi phím.
+
+| Tầng | Vai trò | Độ trễ mục tiêu | Trạng thái |
+|---|---|---|---|
+| 0. n-gram và sinh ứng viên bằng luật | Xác suất từ, cặp, bộ ba (Kneser-Ney), ngữ cảnh phải khi sửa muộn; luôn bật | micro giây đến mili giây | Có (bộ sửa hiện tại) |
+| 1. Bộ kết hợp học được | Chấm mọi ứng viên trên một thang: đầu vào là điểm n-gram, nhãn nguồn, môi trường, độ dài, chữ hoa; đầu ra là ứng viên thắng và độ tự tin; thay các ngưỡng đặt tay | dưới 1 ms | Chưa làm (bước đầu tiên) |
+| 2. Mạng trò nhỏ | Chỉ gọi khi tình huống mơ hồ (dưới ngưỡng tự tin của tầng 1); học phần dư so với n-gram (đầu vào có sẵn điểm n-gram), chưng cất từ thầy | vài mili giây | Chưa làm |
+| 3. Thầy lớn | Chỉ chạy ngoại tuyến trên Kaggle để dạy trò và gắn nhãn | không giới hạn | Mã đã viết (T1, T2), chưa chạy được vì GPU |
+| 4. Sửa muộn chạy nền | Dùng tầng 1 và 2 với ngữ cảnh phải | vài chục mili giây, không chặn phím | Có bản luật (mặc định tắt) |
+
+**Thứ tự làm, mỗi bước có phép đo quyết định bước sau:**
+1. **Tầng 1 với đặc trưng n-gram thuần** (hồi quy logistic hoặc cây quyết định nhỏ), huấn luyện trên lỗi sinh ở `ac-sim` và lỗi thật VSEC, đo trên đường cong Viwiki. Rẻ, không cần GPU. *Điều kiện xem lại:* nếu nó không hơn rõ bảng ngưỡng ở cùng mức đổi nhầm, thì phần "học" chưa đáng, và ta dồn sức vào dữ liệu thay vì mô hình.
+2. **Thầy** khi GPU Kaggle dùng lại được (T1, tùy chọn T2).
+3. **Trò** từ xác suất mềm của thầy, đo khoảng cách thầy–trò trên cùng đường cong.
+4. **Tích hợp** vào app: tầng 1 trong hook, tầng 2 và sửa muộn chạy nền.
+
+**Kết quả bước 1 (tầng 1, 2026-10-06): bộ học không hơn rõ bảng ngưỡng.** `tools/combiner/` (ac-bench `--evidence`, `make_cases.py`, `train_eval.py`): hồi quy logistic và gradient boosting trên 21 đặc trưng n-gram, huấn luyện trên VSEC train + lỗi sinh, đo ở cùng số lần đổi nhầm trên 1000 từ. Sửa đúng so với bảng ngưỡng: VSEC dev 15,0% → 15,2–15,6%; Viwiki 9,6% → 9,9–10,0%; lỗi sinh 27,7% → 29,5–29,7%. Chênh 0,2–2 điểm, trong sai số của 1.077 lỗi thật. Ở mức đổi nhầm rất thấp bộ học giữ độ chính xác cao hơn (95,7% so với 84–89% trên VSEC dev), nhưng thu hồi vẫn chỉ 10–15% trên lỗi thật: phần lớn lỗi không có ứng viên nào đủ điều kiện, nên trần nằm ở nguồn ứng viên và ngữ cảnh, không ở bộ quyết định. Theo điều kiện trên, dồn sức vào dữ liệu. Chưa thử: ngữ cảnh phải, mô hình lớn hơn 21 đặc trưng.
+
+**Kết quả bước 2, lần chạy thử thầy (2026-10-07):** GPU Kaggle chạy lại được. T2 mới (v2.1) cho 36.000 lỗi từ 18.000 câu (1 giờ, 2 T4). Thầy `xlm-roberta-base` chỉ **1.500 bước, 7 phút trên một T4**, trên Viwiki-Spelling (chưa từng huấn luyện), cùng mức đổi nhầm khoảng 1 trên 1000 từ: sửa đúng **16,2% (không có từ bên phải, tau 0,95, 1,14 đổi nhầm) và 23,0% (một từ bên phải, tau 0,9, 1,39)**, so với **9,6% của bộ n-gram ở 1,05** (mục 3.3) và 9,9–10,0% của bộ học tầng 1. Tức thầy mới sau vài phút đã gấp 1,7 đến 2,4 lần thu hồi ở mức đổi nhầm tương đương, và nó vẫn đang học (F1 dev tăng 0,16 → 0,42 → 0,55 qua ba lần đo). Lưu ý khi so: bộ đo của thầy chia Viwiki thành 530.150 từ và 1.514 lỗi, ac-bench 457.560 từ và 1.453 lỗi (khác cách tách từ), nên đây là so sánh gần đúng, chưa cùng một bộ đo; một lần chạy, chưa lặp. Kết quả lần chạy đầy đủ ở ngay dưới.
+
+**Kết quả bước 2, thầy đầy đủ (2026-10-07):** 40.000 bước, 188,6 phút trên một T4 (kernel `autocorrect-t1-teacher`); đường cong dev phẳng từ khoảng bước 38.000. Trên Viwiki (chưa huấn luyện, 530.150 từ, 1.514 lỗi):
+
+| Hệ | Sửa đúng (thu hồi) | Độ chính xác khi sửa | Đổi nhầm /1000 từ |
+|---|---|---|---|
+| n-gram, sửa muộn (mục 3.3) | 9,6% | 22% | 1,05 |
+| Thầy, **1 từ bên phải**, tau 0,9 | **39,1%** | 49,8% | 1,01 |
+| Thầy, 1 từ bên phải, tau 0,95 | 36,6% | 58,4% | 0,66 |
+| Thầy, 1 từ bên phải, tau 0,99 | 30,6% | 77,0% | 0,22 |
+| Thầy, **0 từ bên phải**, tau 0,99 (cao nhất đo) | 22,5% | 11,4% | 4,95 |
+| Thầy 1.500 bước, 0 từ bên phải, tau 0,95 (lần thử) | 16,2% | 24,9% | 1,14 |
+
+Với một từ bên phải, ở cùng mức đổi nhầm thầy gấp khoảng 4 lần thu hồi của n-gram và độ chính xác cũng cao hơn. Với **không có từ bên phải thì thầy đầy đủ đổi nhầm 5 đến 29 trên 1000 từ ở mọi tau đã đo**, tệ hơn cả lần thử 1.500 bước (1,14 ở tau 0,95): huấn luyện lâu làm bản có từ bên phải tốt lên nhưng bản không có từ bên phải tự tin quá mức trên văn bản ngoài miền. *Giả thuyết tỉ lệ lỗi huấn luyện cao hơn văn bản thật (xác suất lệch phía "có lỗi") đã thử bằng cách nâng tau (kernel `autocorrect-t1-recal`, 2026-10-07):* bản 0 từ bên phải chỉ về **ngang n-gram, không hơn**: tau 0,9998 cho 9,2% sửa đúng ở 1,32 đổi nhầm (n-gram 9,6% ở 1,05), tau 0,9999 cho 6,9% ở 0,30. Nâng tau chỉ giảm đổi nhầm bằng cách giảm thu hồi, nên ở lúc đang gõ thầy chưa có lợi thế. Bản 1 từ bên phải giữ lợi thế ở mọi tau: 30,6% ở 0,22 đổi nhầm (tau 0,99), 20,4% với độ chính xác 89% ở 0,06 (tau 0,999). Hệ quả thiết kế: **lúc đang gõ (0 từ bên phải) chưa dùng được thầy; sửa muộn sau một từ thì dùng được.** Điểm còn thiếu: một lần chạy; Viwiki của thầy và ac-bench khác cách tách từ; thầy 283 triệu tham số, không đưa vào app được, cần trò (đã có 200.000 câu nhãn mềm, 478 MB).
+
+**Kết quả bước 3, trò lần 1 (2026-10-07):** `tools/student/student_train.py`, 13,9 triệu tham số (n-gram chữ cái băm + Transformer 3 tầng), học từ 200.000 câu nhãn mềm của thầy, 6 epoch; kernel `autocorrect-student`. Đồng thuận top-1 với thầy trên phần giữ riêng 97,7%. Trên Viwiki (1 từ bên phải): **15,7% sửa đúng ở 1,25 đổi nhầm/1000 (tau 0,9, độ chính xác 23,4%); 10,3% ở 0,25 (tau 0,99)**, so với thầy 39,0% ở 1,01 và 30,6% ở 0,22, n-gram 9,6% ở 1,05. Tức trò gấp khoảng 1,6 lần n-gram nhưng chỉ giữ khoảng 40% thu hồi của thầy. Trên VSEC dev F1 (tau 0,9, 1 từ bên phải) 0,42 so với 0,77 của thầy. Đường cong dev vẫn tăng nhẹ ở epoch 6. Điểm lạ: bản 0 từ bên phải của trò (12,6% ở 0,95 đổi nhầm, tau 0,95) tốt hơn của thầy và nhỉnh hơn n-gram. Nghi ngờ nguyên nhân khoảng cách (chưa kiểm): nhãn mềm chỉ có lỗi tổng hợp trên câu sạch, không có lỗi thật VSEC hay lỗi do LLM chọn, và trò học từ đầu nên không có hiểu biết tiếng Việt có sẵn của thầy. Chưa tích hợp vào app.
+
+**Trò không chưng cất (2026-10-07):** cùng mạng 13,9 triệu tham số, cùng 4.638 bước, nhưng học từ nhãn cứng trên dòng dữ liệu của thầy (75% lỗi tổng hợp, 15% cửa sổ lỗi thật VSEC, 10% lỗi LLM chọn, lỗi sinh tươi mỗi lần); kernel `autocorrect-student-hard`. Viwiki, 1 từ bên phải: **19,1% sửa đúng ở 1,14 đổi nhầm/1000 (tau 0,9, độ chính xác 29,1%); 11,8% ở 0,15 (tau 0,99)**, so với trò chưng cất 15,7% ở 1,25 và 10,3% ở 0,25, thầy 39,0% ở 1,01, n-gram 9,6% ở 1,05. VSEC dev F1 (tau 0,9, 1 từ bên phải) 0,52 so với 0,42 của trò chưng cất. Tức bản không chưng cất **tốt hơn** bản chưng cất ở mọi mức đổi nhầm đã đo, gấp khoảng 2 lần n-gram. **Không tách được nguyên nhân:** bản này có thêm dữ liệu lỗi thật VSEC và lỗi LLM chọn mà nhãn mềm không có, và dữ liệu sinh tươi vô hạn thay vì 200.000 câu lặp 6 lần. Đường cong dev vẫn tăng chậm (0,507 → 0,516 ở epoch 5 → 6). Vẫn còn cách xa thầy.
+
+**Trò chưng cất trực tiếp (2026-10-07):** cùng dòng dữ liệu, cùng 4.638 bước và cùng cấu hình với bản không chưng cất, nhưng nhãn là xác suất top-8 của thầy chấm từng lô (70%) cộng nhãn cứng (30%); kernel `autocorrect-student-online`. Viwiki, 1 từ bên phải, sửa đúng / độ chính xác / đổi nhầm trên 1000 từ:
+
+| tau | Chưng cất ngoại tuyến (200.000 câu) | Nhãn cứng | Chưng cất trực tiếp |
+|---|---|---|---|
+| 0,9 | 15,7% / 23,4% / 1,25 | 19,1% / 29,1% / 1,14 | **20,7% / 30,1% / 1,19** |
+| 0,99 | 10,3% / 42,8% / 0,25 | 11,8% / 58,7% / 0,15 | **13,2% / 61,9% / 0,14** |
+| 0,999 | 5,3% / 59,7% / 0,05 | 4,9% / 74,7% / 0,02 | **6,4% / 86,5% / 0,01** |
+
+VSEC dev F1 (tau 0,9, 1 từ bên phải): 0,42 / 0,52 / **0,56**. Kết luận: thầy **có giúp, nhưng ít** (khoảng 10% thu hồi tương đối trên Viwiki, nhiều hơn trên VSEC dev vốn gần miền huấn luyện), và việc bản ngoại tuyến thua là do dữ liệu (không có lỗi thật VSEC và lỗi LLM chọn, 200.000 câu lặp lại), không phải do chưng cất. Mỗi cấu hình mới chạy một lần, chênh 1 đến 2 điểm trên 1.511 lỗi nên chưa chắc chắn. **Trần của trò 14 triệu tham số khoảng 20% thu hồi ở 1,2 đổi nhầm, thầy 39%:** khoảng cách chủ yếu do dung lượng và hiểu biết tiếng Việt có sẵn của thầy, không do nhãn. Đường nhanh khác để thử là chạy chính thầy (lượng tử hóa int8, khoảng 280 MB) ở tầng sửa muộn chạy nền, cần đo độ trễ trên CPU của máy bạn.
+
+**Đo trên máy thật, CPU 4 luồng (2026-10-07, `tools/student/bench_cpu.py`, log trong `models/bench_cpu.log` và `models/bench_cpu_student.log`):** cửa sổ Viwiki thật 21 từ, một từ bên phải, mỗi lần một cửa sổ, gồm tách từ và chạy mạng bằng PyTorch.
+
+| Bản | Dung lượng | Độ trễ, 1 luồng / 4 luồng (trung bình, p95 4 luồng) | Thu hồi, tau 0,9 (mẫu 300 lỗi) | Quyết định giống bản fp32 |
+|---|---|---|---|---|
+| Thầy fp32 | 1.133 MB | 300 ms / 220 ms (p95 349) | 38,7% | |
+| Thầy int8 (nén động lớp Linear) | 861 MB | 253 ms / 206 ms (p95 285) | **22,0%** (tau 0,99: 10,0% so với 32,7%) | 96,4% |
+| Trò (chưng cất trực tiếp) fp32 | 56 MB | **14,7 ms** / 14,7 ms (p95 21) | 21,3% | |
+| Trò int8 | 47 MB | 22 ms / 25 ms (đã tắt đường nhanh của PyTorch) | 21,7% | 99,6% |
+
+Kết luận: (1) **nén int8 đơn giản làm thầy mất gần nửa thu hồi** mà chỉ nhanh hơn khoảng 15% và nhẹ hơn 24%, vì phần lớn dung lượng là bảng nhúng 250 nghìn từ (khoảng 770 MB) không được nén; nên không dùng được cách này. Thầy fp32 mất 220 đến 300 ms mỗi từ trên CPU, đủ cho sửa muộn chạy nền nhưng chiếm CPU liên tục khi gõ và cần 1,1 GB. (2) **Trò 56 MB chạy khoảng 15 ms mỗi cửa sổ, đủ nhanh cả trong lúc gõ**, và nén int8 giữ nguyên chất lượng (mất 0,0026 xác suất trung bình); int8 trong PyTorch chậm hơn vì mất đường nhanh, tốc độ thật sẽ phụ thuộc bản cài bằng Rust. Thu hồi trên mẫu khớp với toàn bộ Viwiki (thầy 38,7% so với 39,0%, trò 21,3% so với 20,7%). Mẫu chỉ có 1.200 từ sạch nên **không đo được tỉ lệ đổi nhầm dưới khoảng 1 trên 1000 và độ chính xác ở đây bị thổi phồng** (lỗi chiếm 20% mẫu so với khoảng 0,3% thật): dùng bảng Viwiki đầy đủ cho các số đó.
+
+**Đo đầu-cuối trong điều kiện app và nhật ký thật (2026-10-07).** Đo bằng Rust đúng dạng đầu vào của app (`ac-bench --viwiki`: lịch sử tối đa 4 từ trong cụm, dấu câu cắt cụm, một từ bên phải) cho kết quả **kém hơn** đo Python trên cửa sổ cả câu: trò chưa học dạng đầu vào này (trò cũ, chọn sửa tự do, toàn bộ Viwiki: mức 0,99 thu hồi 8,6%, độ chính xác 23,6%, 0,82 đổi nhầm/1000; mức 0,9: 16,1%, 13,1%, 3,31). Mốc n-gram sửa muộn cũ (25 tài liệu): thu hồi 10,8%, độ chính xác 35,8%, 0,55 đổi nhầm. Trò mới (có phím giữ) với n-gram dự phòng và chọn ứng viên trong tập hợp lý: mức 0,99: 18,5%, 22,5%, 1,77; mức 0,9: 26,6%, 15,9%, 3,90. Nên mỗi lần sửa đúng thêm phải đánh đổi khoảng 5 đến 6 lần đổi nhầm: chưa đạt ưu tiên chính xác. Nhật ký thật của người dùng (194 lần tự sửa) cho thấy 21 lần là sửa nhầm từ tiếng Anh gõ bằng cách bấm đôi phím dấu Telex (`tesst` hiện `test` bị đổi thành `tết`, `json` thành `son`); đã sửa lớp lỗi này trong `SmartCorrector::typed` (chữ hiện ra là từ tiếng Anh đã biết thì giữ). 41 trong 55 ca "gần" là từ không dấu cần từ kế tiếp quyết định; 35 lần tự sửa có phím dấu gõ đôi, 14 lần có chữ lặp 3 lần.
+
+**Hướng mới (người dùng, 2026-10-07): bảo vệ (guard) song song với độ chính xác, và trò kết hợp với n-gram, không chạy riêng.** Mục tiêu đo: số lần sửa nhầm trên 1000 từ ở mức rất thấp, rồi mới tối đa thu hồi. Kế hoạch: (A) LLM 3B Instruct (7B nếu thiếu đa dạng) viết câu sạch cùng miền người dùng (trò chuyện kỹ thuật, máy học, lẫn thuật ngữ tiếng Anh) bằng chủ đề và phong cách chung, không dùng dòng nhật ký nào (`t3_domain_text.py`); (B) chạy động cơ (n-gram + trò) trên văn bản sạch đó: mỗi lần nó đổi chữ là một sửa nhầm có nhãn, dùng để huấn luyện bộ bảo vệ (bộ kết hợp học được trên đặc trưng của trò và n-gram), tinh chỉnh trên VSEC dev và chỉ đo trên Viwiki; (C) huấn luyện lại trò trên dữ liệu cùng miền, đúng dạng đầu vào của app.
+
+**Dữ liệu T2 sau bước 1:** chọn lỗi nay đòi từ hợp lệ thay thế thua ít nhất 3 nat (từ hợp lệ ở chỗ đó có thể là đúng), và cân các loại lỗi theo tỉ lệ đo được (`KIND_WEIGHTS`) thay vì để loại dễ lấn át; xem `AUGMENT_RULES.md`.
+
+**Chưa kiểm chứng (giả thuyết, cần đo):** trò học phần dư so với n-gram sẽ nhỏ hơn trò độc lập mà vẫn tốt; tầng 1 một mình đã nâng đường cong; ngân sách vài mili giây cho tầng 2 đủ trên CPU phổ thông. **Câu hỏi mở:** cỡ trò; mạng chạy bằng gì trong app (ONNX, hay tự cài bằng Rust); hạn mức GPU Kaggle.
+
+**Bài toán của thầy v1.** Với mỗi âm tiết của một cụm câu như đang hiện trên màn hình: *giữ nguyên* hoặc *thay
+bằng một âm tiết của từ vựng* (6 795 âm tiết, `data/vi_syllables.tsv`), cộng *loại lỗi* (đầu phụ, 11 loại). Hai đầu
+phân loại như bài báo Tran và cộng sự, nhưng ở mức âm tiết. Kiểm tra trên dữ liệu thật: 95% lỗi của VSEC và 92%
+lỗi của Viwiki có chữ đúng nằm trong từ vựng, nên cách "chọn một âm tiết" bao được phần lớn lỗi thật.
+
+**Ngữ cảnh mô phỏng lúc gõ.** Mỗi mẫu huấn luyện là một cửa sổ kết thúc ở chỗ người gõ đang đứng: 4 vị trí cuối có
+3, 2, 1, 0 từ phía sau (đúng như khi một từ vừa gõ xong và các từ sau lần lượt xuất hiện). Xen vào là mẫu cả câu
+(sửa muộn thấy được). Một mô hình, hai chế độ, không cần hai bộ trọng số.
+
+**Dữ liệu.** Lỗi sinh ngay lúc đọc từ 1,4 triệu câu sạch (tin tức, web, phụ đề), theo tỉ lệ loại lỗi của VSEC
+(65% chỉ sai dấu hoặc thanh, 30% sai một chữ, 5% khác), mỗi câu một tỉ lệ lỗi ngẫu nhiên từ 1% đến 15%;
+15% cửa sổ lấy từ lỗi **thật** của VSEC (90% VSEC để huấn luyện, 10% để kiểm tra giữa chừng). Viwiki chỉ để thử
+cuối cùng, không bao giờ vào huấn luyện: đo chéo giữa hai nguồn lỗi thật khác nhau.
+
+**Đo.** Cùng đường "sửa đúng so với đổi nhầm trên 1000 từ" với `ac-sim` và `ac-bench --viwiki`, ở 0 và 1 từ phía
+sau; so với bộ sửa luật hiện tại ở cùng mức đổi nhầm (mục 3.3). Chọn checkpoint theo F1 của "sửa đúng" ở ngưỡng
+tự tin 0,9 trên VSEC dev.
+
+**Tăng dữ liệu bằng LLM mở (T2, 2026-10-05).** Danh sách quy tắc đầy đủ và mở: `tools/kaggle/AUGMENT_RULES.md`. Mục đích: thêm lỗi "từ hợp lệ nhưng sai theo ngữ cảnh", loại khó
+nhất và chỉ có 1520 ca thật (Viwiki) để đo. Nguyên tắc: **LLM chỉ chọn lỗi nào để tạo, không bao giờ quyết định
+cái gì đúng**; đáp án luôn là câu gốc, nên nhãn không bị nhiễu. Cách làm: với một âm tiết, bộ sinh ứng viên liệt kê
+các âm tiết hợp lệ dễ nhầm (cùng chữ khác dấu, hoặc lệch một chữ), một mô hình ngôn ngữ nhân quả cỡ 2B đến 3B
+(mặc định `Qwen/Qwen2.5-3B`, chưa kiểm tra có sẵn) chấm xác suất câu đã thay, và giữ một lỗi mà câu vẫn đọc được
+nhưng kém câu gốc ít nhất 1 nat (càng gần câu gốc càng dễ được chọn: ca khó). Câu mà LLM thích bản thay hơn bản
+gốc thì bỏ. Chạy hai tiến trình độc lập, mỗi tiến trình một GPU T4, mỗi tiến trình một nửa số câu (gần gấp đôi
+tốc độ, không cần chia một mô hình qua hai GPU). Tập đo vẫn chỉ là lỗi thật (VSEC dev, Viwiki); lợi ích phải được
+chứng minh bằng đối chứng có và không có dữ liệu LLM trên đường cong Viwiki. Chưa làm: cho LLM tự *viết* lỗi
+(mô hình nhỏ dễ bịa), văn bản terminal và code, từ chuyên ngành.
+
+**Lần chạy thử đầu của T2 (2026-10-06, Kaggle 2 × Tesla T4, `Qwen/Qwen2.5-3B`, 5 000 câu).** Chạy được, hai tiến trình
+thoát mã 0, khoảng 10 phút kể cả 2 phút nạp mô hình; đo được 6 đến 7 câu mỗi giây mỗi GPU (cho 4 962 lỗi, tức 99% số
+câu thử). Các lỗi sinh ra phần lớn đọc như lỗi người thật có thể mắc (`dự kiện thi` thay `dự kiến thi`, `Tất ca` thay
+`Tất cả`, `đàm phám` thay `đàm phán`, `Thanh thinh` thay `Thanh Thịnh`). Hai vấn đề:
+(1) **Quá dễ:** độ lệch trung vị 11,0 nat; chỉ 13% lỗi dưới 4 nat (khoảng 640 mẫu) và 3,8% dưới 2 nat. Tham số
+`min_margin = 1` hầu như không lọc gì (giữ 99%): mỗi câu chỉ thử một vị trí, và đa số âm tiết thay vào đều sai rõ.
+(2) **Cơ cấu loại lỗi lệch so với lỗi thật:** 75% là lệch một chữ, 25% chỉ khác dấu hoặc thanh, trong khi lỗi thật
+(VSEC) khoảng 65% là chỉ sai dấu hoặc thanh. Một phần vì ứng viên chỉ lấy từ âm tiết hợp lệ trong từ vựng.
+Cách sửa dự kiến: thử nhiều vị trí mỗi câu và lấy ca có độ lệch nhỏ nhất, hạ nhiệt độ chọn, phân tầng ứng viên theo
+tỉ lệ loại lỗi của VSEC. Dữ liệu và kernel nằm trong tài khoản Kaggle (riêng tư): dataset `autocorrect-train`,
+kernel `autocorrect-t2-probe`.
+
+**Trò (chưa viết).** Huấn luyện trên *xác suất mềm* của thầy (top 8 âm tiết và xác suất loại lỗi, xuất sẵn trong
+`soft_labels.jsonl`), cùng định dạng đầu vào và đầu ra với thầy. Đo khoảng cách thầy–trò trên cùng đường cong.
+
+**Giới hạn của v1, nói thẳng:**
+- Lỗi sinh ở mức văn bản (dấu, thanh, chữ), **chưa** ở mức phím Telex, Backspace hay dính từ: `ac-sim` làm được
+  phần đó nhưng chưa có đường xuất cho huấn luyện. Dính từ vẫn do bộ tách luật lo.
+- Chỉ âm tiết tiếng Việt; từ tiếng Anh, số, tên riêng được để nguyên (nhãn "giữ").
+- Môi trường luôn là `normal`; chưa có dữ liệu cho terminal, code.
+- Thầy học từ phân phối lỗi sinh, nên thừa hưởng độ lệch của nó (mục 3.4: cần hiệu chỉnh bằng lỗi thật).
+- Mã chưa chạy trên GPU; chỉ có kiểm tra khói trên CPU (ghép nhãn, loss, dự đoán).
+
+### 5.x Cải thiện mô hình trò (bạn chốt 2026-10-08: tạm giữ cấu hình hiện tại, tiếp tục cải thiện)
+
+**Điều đã đo (bộ giả lập gõ, lỗi bấm phím, 140.059 từ đúng và 13.535 từ sai):** mô hình trò giúp ở nhóm lỗi mà n-gram bỏ qua (từ gõ sai thành từ hợp lệ khác: sửa đúng 9,9% → 18,0%), nhưng cái giá là đổi nhầm từ đúng. Quét `tau`: ở 0,99 mỗi lần sửa đúng thêm đi kèm 1,5 lần nhầm; 0,999 còn 0,7 nhưng chỉ thêm 111 lần đúng; 0,9999 gần như không có mô hình trò. Đường cong phẳng quanh 0,7 đến 0,8: nâng `tau` chỉ bớt cả hai, nên cần **mô hình tốt hơn**, không phải ngưỡng khác. Mặc định `tau` giữ 0,99 (chưa đổi).
+
+**Hướng, theo thứ tự (chưa làm):**
+1. **Dữ liệu phủ định cứng.** Chạy động cơ cùng mô hình trò trên câu sạch trong miền (T3) và trên câu gõ giả lập, thu mọi từ đúng bị đổi nhầm, làm mẫu huấn luyện với nhãn GIỮ. Hiện mô hình trò chưa từng thấy chính các lỗi của nó.
+2. **Cửa sổ giống lúc dùng thật.** Lịch sử ≤ 4 từ, không dấu câu, 1 từ bên phải (đã đo: cửa sổ cả câu lạc quan hơn trong app); thêm lỗi mức phím từ `ac-sim`, không chỉ lỗi mức chữ.
+3. **Nhắm vào nhóm bị bỏ qua** (từ gõ sai thành từ hợp lệ): đây là chỗ mô hình trò đem lại nhiều nhất; đo riêng nhóm này khi so sánh các phiên bản.
+4. **Đo bằng cùng thước:** quét `tau` trên bộ giả lập (`ac-sim --student`), số lần nhầm thêm trên mỗi lần đúng thêm, Viwiki, và nhật ký thật; mô hình mới chỉ thay khi tỉ lệ này thấp hơn rõ rệt ở cùng `tau`.
+5. Về sau: thầy lớn hơn hoặc chưng cất nhiều vòng nếu 1 đến 3 chưa đủ.
+
+### 5.y Hướng bạn đề xuất (2026-10-08): cỡ mô hình vừa đủ, học liên tục, thích ứng cá nhân hóa
+
+Mục tiêu: không phải huấn luyện lại từ đầu mỗi lần mà vẫn học tiếp từ cách người dùng gõ. Ghi ở đây các điểm cần nghiên cứu, **chưa có thí nghiệm nào**:
+1. **Cỡ mô hình vừa đủ.** Mô hình trò hiện 13,9 triệu tham số (56 MB fp32, ~15 ms/cửa sổ trên CPU 4 luồng). Phần đọc ngữ cảnh (3 tầng, d=256) chỉ khoảng 2 triệu tham số theo ước tính; phần lớn còn lại là bảng nhúng chữ cái băm, nhúng từ và đầu ra 6.796 lớp. Cần quét cỡ (nhúng, số tầng, d, số lớp) trên cùng đường cong, và thử nén (fp16, int8 chỉ cho trò; với thầy int8 đã làm mất một nửa độ thu hồi), để biết cỡ nhỏ nhất không mất chất lượng.
+2. **Cá nhân hóa theo thứ tự rẻ đến đắt:** (a) đếm n-gram riêng của người dùng cộng vào bảng Kneser-Ney (không cần gradient); (b) mô hình lỗi riêng: ma trận nhầm phím và chi phí lỗi học từ nhật ký (hiện chi phí `slip.cost` đặt tay); (c) hiệu chỉnh xác suất của mô hình trò theo người dùng (vài tham số, ví dụ chỉnh `tau` hoặc độ lệch của lớp GIỮ); (d) bộ chỉnh nhỏ (adapter) trên mô hình trò đóng băng, chỉ khi (a) đến (c) chưa đủ.
+3. **Tín hiệu từ người dùng, ngầm:** Ctrl+Z ngay sau lần sửa (nhãn xấu), lần sửa mà người dùng đi tiếp (nhãn tốt yếu), sửa tay (EDIT: từ đúng), bỏ sót mà sau đó người dùng sửa tay. Hiện đã có dạng sơ khai: hoàn tác hai lần thì bỏ qua từ đó mãi.
+4. **Rủi ro cần đo:** quên cái cũ khi học tiếp (cần bộ đệm phát lại hoặc đóng băng phần lõi và giới hạn mức ảnh hưởng của phần học theo người dùng); tín hiệu nhiễu (nhật ký có cả lần bạn thử nghiệm với app); độ lệch chọn lọc (chỉ thấy những ca đã được sửa); ít dữ liệu (nhật ký hiện chỉ khoảng 200 lần sửa) nên phương pháp cần ít tham số; dữ liệu cá nhân chỉ ở máy.
+5. **Cách đo:** dùng `ac-sim` làm người dùng giả với thói quen khác nhau (hồ sơ gõ khác, ví dụ phím lân cận khác), vẽ đường học: sửa đúng và đổi nhầm theo số sự kiện đã thấy, rồi mới thử trên nhật ký thật.
+Điều kiện chung: chỉ bật khi đường học cho thấy lợi ích ở cùng mức đổi nhầm; không đổi mặc định khi chưa đo.
+
 ## 6. Mốc
 
 | Mốc | Nội dung | Trạng thái |
@@ -177,7 +375,7 @@ tự sửa tay (Backspace vào từ rồi gõ lại), đã được engine bắt
 | R1 | Sim v1: người gõ, engine thật, màn hình, làn đối chứng, Ctrl+Z, xuất JSONL | Xong, kết quả ở mục 3.1 |
 | R2 | Hiệu chỉnh người gõ bằng lỗi thật (cần `journal_edits`) | Chờ dữ liệu |
 | R2b | Thiếu dấu cách (#6): tách k âm tiết (quy hoạch động), engine thay một từ bằng k từ, đo theo k bằng sim | Bản đầu xong (mục 3.2); thiếu: lỗi gõ bên trong chuỗi dính, học cách chọn |
-| R3 | Mô hình học cho yêu cầu #1 và #4 (lỗi từ hợp lệ theo ngữ cảnh, có để nguyên) | |
+| R3 | Mô hình học cho yêu cầu #1 và #4 (lỗi từ hợp lệ theo ngữ cảnh, có để nguyên): hướng đã chốt là n-gram + bộ kết hợp học được + mạng trò (mục 5) | Bước 1 (bộ kết hợp n-gram) là việc tiếp theo; thầy v1 đã viết, chưa chạy |
 | R4 | Thích nghi môi trường và học trực tuyến (#2) | |
 | R5 | Ngữ pháp (#3) | |
 
@@ -187,3 +385,32 @@ tự sửa tay (Backspace vào từ rồi gõ lại), đã được engine bắt
   (terminal vừa gõ lệnh vừa chat với Claude Code)?
 - Nguồn câu cho prompt và lệnh shell: tự sinh, hay dùng lịch sử lệnh của bạn (chỉ khi được phép)?
 - Ngân sách độ trễ cho mô hình học: bao nhiêu ms mỗi từ là chấp nhận được?
+
+## 8. Tài liệu tham khảo
+
+- **Tran, Dinh, Phan, Nguyen (2021), "Hierarchical Transformer Encoders for Vietnamese Spelling Correction"**
+  (arXiv 2105.13578). Mô hình: bộ mã hóa Transformer hai tầng (ký tự: 4 lớp, ẩn 256; từ: 12 lớp, ẩn 768),
+  hai đầu phân loại chung một mô hình (phát hiện lỗi có hay không cho từng token, và gợi ý sửa từ từ vựng),
+  loss là tổng hai cross-entropy, từ đúng không tính vào loss sửa. Dữ liệu huấn luyện sinh bằng luật từ khoảng
+  3 GB văn bản (tin tức, Wikipedia, phụ đề), chia lỗi làm ba nhóm: gõ sai (thêm, thiếu, thay), lỗi chính tả
+  theo vùng miền, thiếu dấu. Dùng ngữ cảnh hai phía. Số liệu họ báo cho bộ thử lỗi thật từ bản nháp Wikipedia
+  (1500 lỗi trong 14 000 câu): precision 66,96%, recall 70,92%, F1 68,88%; thêm dấu cho phụ đề: F1 99,75%.
+  Hạn chế họ nêu: không xử lý được các từ dính nhau hoặc từ viết tắt vì mỗi token chỉ ra một token. Họ không
+  nói gì về thích nghi theo người dùng. (Mình đọc qua bản tóm tắt tự động của trang HTML, chưa đối chiếu
+  từng con số với bản PDF.)
+  Liên hệ với ta: (1) khớp với ý "đầu phân loại lỗi là đầu phụ của cùng một mô hình"; (2) cùng cách sinh lỗi
+  bằng luật rồi học, nhưng họ làm trên văn bản đã gõ xong, không có chuỗi phím Telex, Backspace, Ctrl+Z;
+  (3) ngay cả mô hình lớn cũng chỉ đạt F1 khoảng 69% trên lỗi thật, cho thấy đánh đổi chính xác/độ phủ ở mục
+  1.2 là có thật; (4) mô hình 12 lớp 768 ẩn quá nặng cho chạy theo từng từ trên CPU, nên chỉ hợp làm "thầy"
+  để chưng cất; (5) lỗi từ dính nhau (#17) là chỗ họ cũng bó tay, ta đã có bộ tách bằng luật.
+- **Gupta (2019), "A context sensitive real-time Spell Checker with language adaptability"** (arXiv 1910.11242, Amazon).
+  Gần với ta nhất về tinh thần: thời gian thực, dựa trên n-gram, thích ứng ngôn ngữ (dựng bảng từ Wikipedia và phụ đề,
+  24 ngôn ngữ). Sinh ứng viên bằng thuật toán xóa đối xứng (khoảng cách sửa tối đa 2), xếp hạng bằng
+  `S = W1·P(w) + W2·P(w | trước) + W3·P(w | hai từ trước)`; **không có mô hình học sâu**, chỉ xử lý lỗi "từ không có
+  trong từ điển" (từ dài hơn 2 ký tự), tác giả nêu lỗi từ hợp lệ và từ ghép là việc tương lai. Độ trễ: phát hiện khoảng
+  7 micro giây mỗi từ, sinh ứng viên 0,4 đến 50 ms, xếp hạng 1 đến 3 ms. Ba cách sinh lỗi mô phỏng: ký tự ngẫu nhiên,
+  đảo hai ký tự kề nhau, và thay ký tự theo xác suất bigram ký tự (gần lỗi kề phím nhất). Trên lỗi thật tiếng Anh: hạng 1
+  đạt 68,99% so với Aspell 60,82% và Hunspell 61,34%; trên dữ liệu mô phỏng hạng 1 từ 80% trở lên cho cả 24 ngôn ngữ.
+  Nhận xét: trọng số n-gram phải cân bằng (đẩy một bậc lên quá cao thì độ chính xác tụt), đúng chỗ bộ kết hợp học được
+  của ta thay cho việc dò tay. Không có Telex, không có phím lúc gõ, không có hoàn tác. (Mình đọc nội dung các trang
+  1 đến 6 của bản PDF; chưa đọc phần tài liệu tham khảo của họ.)
