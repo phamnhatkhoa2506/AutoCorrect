@@ -14,3 +14,6 @@ __pycache__/
 /models/
 # experiment files of tools/combiner (cases, evidence, models)
 /tools/combiner/work/
+
+# release packages built by hand
+/dist/
