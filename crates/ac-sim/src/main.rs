@@ -2,7 +2,7 @@
 //!
 //!     cargo run -p ac-sim --release -- [--sentences N] [--env normal|code|both] [--seed S]
 //!         [--rate R] [--notice P] [--undo P] [--wrap P] [--join P] [--join-max N] [--join-continue P] [--join-more P] [--join-runs N] [--join-slip P]
-//!         [--strength 0|1|2] [--no-delayed] [--code-english] [--no-guards] [--student [file]] [--student-tau T]
+//!         [--strength 0|1|2] [--no-delayed] [--code-english] [--no-guards] [--calibrated] [--student [file]] [--student-tau T]
 //!         [--split-margin M] [--split-lift L] [--split-floor F]
 //!         [--show N] [--export out.jsonl]
 //!
@@ -78,7 +78,7 @@ fn main() {
     let sentences = flag("--sentences", 300.0) as usize;
     let seed = flag("--seed", 7.0) as u64;
     let show = flag("--show", 0.0) as usize;
-    let d = Profile::default();
+    let d = if has("--calibrated") { Profile::calibrated() } else { Profile::default() };
     let profile =
         Profile { rate: flag("--rate", d.rate), notice: flag("--notice", d.notice), undo: flag("--undo", d.undo), wrap: flag("--wrap", d.wrap), join: flag("--join", d.join), join_max: flag("--join-max", d.join_max as f64) as usize, join_continue: flag("--join-continue", d.join_continue), join_more: flag("--join-more", d.join_more), join_runs: flag("--join-runs", d.join_runs as f64) as usize, join_slip: flag("--join-slip", d.join_slip), ..d };
     let settings = AppSettings {

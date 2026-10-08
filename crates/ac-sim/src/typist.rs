@@ -299,6 +299,32 @@ pub struct Profile {
     pub join_slip: f64,
 }
 
+impl Profile {
+    /// The kinds of slip in the proportions of the writer's journal (2026-10-08): the fixes the app made, 171 distinct
+    /// (typed, fixed) pairs, classified by `tools` heuristics, against what the simulator fixes with the default
+    /// weights. Each default weight is multiplied by the square root of (share in the journal / share of the
+    /// simulator's fixes), the root because the journal is small and biased towards slips that the engine can fix
+    /// (a slip that lands on another valid word is not in it). Kinds absent from the journal keep their weight.
+    /// Not a measurement of how the writer slips: a better guess than the default, to be redone on more data.
+    pub fn calibrated() -> Self {
+        let weights = vec![
+            (Slip::Neighbour, 15.6),
+            (Slip::Omit, 14.1),
+            (Slip::Double, 7.3),
+            (Slip::Extra, 16.3),
+            (Slip::Swap, 13.1),
+            (Slip::ToneWrong, 8.0),
+            (Slip::ToneMissing, 4.6),
+            (Slip::MarkHalf, 9.7),
+            (Slip::CapsHeld, 2.0),
+            (Slip::Slide, 3.0),
+            (Slip::Multi, 6.0),
+            (Slip::Held, 4.0),
+        ];
+        Self { weights, ..Self::default() }
+    }
+}
+
 impl Default for Profile {
     /// Guesses, not measurements (see the module documentation).
     fn default() -> Self {
