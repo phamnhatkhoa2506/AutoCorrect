@@ -131,9 +131,9 @@ impl State {
             s.student_tau as f32 / 10_000.0
         } else {
             match s.strength {
-                ac_config::Strength::Careful => 0.999,
+                ac_config::Strength::Careful => 0.9999,
                 ac_config::Strength::Balanced => ac_core::STUDENT_TAU,
-                ac_config::Strength::Bold => 0.9,
+                ac_config::Strength::Bold => 0.99,
             }
         });
         corrector.set_student_fallback(s.student_fallback);

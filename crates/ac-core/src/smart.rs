@@ -217,9 +217,10 @@ pub struct SmartCorrector {
     student_fallback: bool,
 }
 
-/// Default confidence of the student. On Viwiki-Spelling (RESEARCH.md, section 5) 0.99 corrects about 13% of
-/// the mistakes with about 0.14 wrong changes per 1000 correct words; 0.9 corrects about 21% with about 1.2.
-pub const STUDENT_TAU: f32 = 0.99;
+/// Default confidence of the student. On the key-level simulator (ac-sim --student, tau sweep of 2026-10-08,
+/// RESEARCH.md section 5.x) 0.999 adds the most right fixes for the fewest wrong changes of the student v2: 1.5 wrong
+/// changes per extra right fix, against 3.4 at 0.99 and 6.2 at 0.995 (0.7 for the first model).
+pub const STUDENT_TAU: f32 = 0.999;
 
 /// Scores behind a decision, for diagnostics.
 #[derive(Debug)]

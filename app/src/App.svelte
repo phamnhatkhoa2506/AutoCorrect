@@ -271,7 +271,7 @@
           <p class="lead">Chỉ có tác dụng khi bật "Sửa muộn" và "Dùng mô hình học" ở tab Chung.</p>
           <label class="row">
             <span>Mức tin cậy của mô hình học
-              <small>Càng cao càng ít sửa nhầm và càng bỏ sót nhiều. Mặc định theo mức độ sửa ở trên (Cẩn thận 0,999, Cân bằng 0,99, Mạnh tay 0,9).</small></span>
+              <small>Càng cao càng ít sửa nhầm và càng bỏ sót nhiều. Mặc định theo mức độ sửa ở trên (Cẩn thận 0,9999, Cân bằng 0,999, Mạnh tay 0,99).</small></span>
             <select bind:value={options.student_tau} onchange={saveOptions}>
               <option value={0}>Theo mức độ sửa</option>
               <option value={9000}>0,90</option>
@@ -279,6 +279,7 @@
               <option value={9900}>0,99</option>
               <option value={9950}>0,995</option>
               <option value={9990}>0,999</option>
+              <option value={9999}>0,9999</option>
             </select>
           </label>
           <label><input type="checkbox" bind:checked={options.student_restricted} onchange={saveOptions} />
