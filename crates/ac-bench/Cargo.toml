@@ -8,3 +8,4 @@ publish = false
 ac-core = { path = "../ac-core" }
 ac-telex = { path = "../ac-telex" }
 unicode-normalization = "0.1"
+serde_json = "1"

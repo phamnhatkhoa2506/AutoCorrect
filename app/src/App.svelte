@@ -234,6 +234,9 @@
             <span>Tự thêm dấu khi gõ không dấu <small>khong → không</small></span></label>
           <label><input type="checkbox" bind:checked={options.delayed} onchange={saveOptions} />
             <span>Sửa muộn khi đã gõ từ kế tiếp <small>Thử nghiệm: "that là" → "thật là". Sửa lại từ ngay trước khi đã có từ sau; Ctrl+Z hoàn tác cả hai từ. Mặc định tắt.</small></span></label>
+          <label class="sub"><input type="checkbox" bind:checked={options.student} onchange={saveOptions} disabled={!options.delayed} />
+            <span>Dùng mô hình học (trò) kết hợp với n-gram cho sửa muộn
+              <small>Trò quyết định có đổi từ hay không và gợi ý cách sửa, n-gram kiểm tra chữ gõ và sửa tiếp những gì trò bỏ qua. Cần file student.acs cạnh autocorrect.exe hoặc trong thư mục cấu hình; thiếu file thì tự dùng n-gram. Mức tin cậy theo tab "Mức độ sửa". Chỉ có tác dụng khi bật sửa muộn. Tắt: chỉ n-gram.</small></span></label>
           <label><input type="checkbox" bind:checked={options.code_english} onchange={saveOptions} />
             <span>Sửa lỗi tiếng Anh cả trong IDE / terminal
               <small>Hữu ích cho khung chat của IDE; có thể đụng tới lệnh và mã.</small></span></label>
@@ -263,6 +266,33 @@
             <span><b>{name}</b><small>{text}</small></span>
           </label>
         {/each}
+        <section>
+          <h3>Mô hình học (nâng cao)</h3>
+          <p class="lead">Chỉ có tác dụng khi bật "Sửa muộn" và "Dùng mô hình học" ở tab Chung.</p>
+          <label class="row">
+            <span>Mức tin cậy của mô hình học
+              <small>Càng cao càng ít sửa nhầm và càng bỏ sót nhiều. Mặc định theo mức độ sửa ở trên (Cẩn thận 0,999, Cân bằng 0,99, Mạnh tay 0,9).</small></span>
+            <select bind:value={options.student_tau} onchange={saveOptions}>
+              <option value={0}>Theo mức độ sửa</option>
+              <option value={9000}>0,90</option>
+              <option value={9500}>0,95</option>
+              <option value={9900}>0,99</option>
+              <option value={9950}>0,995</option>
+              <option value={9990}>0,999</option>
+            </select>
+          </label>
+          <label><input type="checkbox" bind:checked={options.student_restricted} onchange={saveOptions} />
+            <span>Chỉ chọn cách sửa hợp lý theo chữ đã gõ
+              <small>Mô hình học chỉ quyết định có sửa hay không; cách sửa phải nằm trong những cách n-gram thấy gần với chữ bạn gõ (ít sai phím, rút gọn chữ lặp). Tắt thì mô hình tự chọn, dễ sửa nhầm sang từ xa chữ gõ.</small></span></label>
+          <label><input type="checkbox" bind:checked={options.student_fallback} onchange={saveOptions} />
+            <span>Cho n-gram sửa tiếp những gì mô hình học bỏ qua
+              <small>Ví dụ "that là" thành "thật là" vẫn do n-gram sửa nếu mô hình học để nguyên. Tắt thì mô hình học quyết định một mình.</small></span></label>
+          <label class="row">
+            <span>Trọng số n-gram khi chọn cách sửa: <b>{(options.student_weight / 100).toFixed(1)}</b>
+              <small>0 là chỉ theo mô hình học; cao hơn thì điểm n-gram (từ trước và sau) có tiếng nói hơn.</small></span>
+            <input type="range" min="0" max="150" step="10" bind:value={options.student_weight} onchange={saveOptions} />
+          </label>
+        </section>
       {:else if tab === 'apps'}
         <h2>Ứng dụng</h2>
         <p class="lead">
@@ -424,6 +454,10 @@
   }
   .lead { color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
   label { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; cursor: pointer; }
+  label.row { justify-content: space-between; align-items: center; gap: 16px; }
+  label.row select, label.row input[type="range"] { flex: none; min-width: 160px; }
+  label.sub { margin-left: 26px; }
+  label.sub:has(input:disabled) { opacity: 0.55; cursor: default; }
   label span { display: flex; flex-direction: column; gap: 2px; }
   small { color: var(--muted); font-size: 12px; }
   input[type='checkbox'], input[type='radio'] { margin-top: 3px; accent-color: var(--accent); }

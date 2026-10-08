@@ -41,6 +41,10 @@ Không chứa dữ liệu của người dùng. Trường chính:
 
 `--sentences N` chọn số câu mỗi tập; số mẫu khoảng 40 lần số câu cho tiếng Việt.
 
+## Bộ thử ngoài (`--viwiki`)
+
+`cargo run -p ac-bench --release -- --viwiki [--docs N] [--show N]` chạy bộ sửa trên Viwiki-Spelling (107 bài Wikipedia, lỗi thật có chú thích; tải về `data/raw/viwiki_spelling/spelling_test.json`, nguồn ở `data/ATTRIBUTION.md`). Khoảng 6 phút cho cả bộ. Báo số từ bị đổi, precision và recall (theo phát hiện lỗi và theo sửa đúng), số lần đổi từ không chú thích trên 1000 từ, và tỉ lệ sửa đúng theo loại lỗi, cho ba cách chạy: sửa tức thì, sửa muộn với từ kế tiếp, và cả hai như app. Các cờ ngưỡng (`--revise-margin`, `--split-lift`...) dùng như ở chế độ thường. Kết quả và cách đọc ở `RESEARCH.md` mục 3.3.
+
 ## Nhật ký học (`journal.tsv`)
 
 Mỗi dòng: `giây_unix<Tab>loại<Tab>...`. Có sáu loại (`FIX`, `LATE`, `UNDO`, `UNDO-LATE`, `EDIT`, `NEAR`); `EDIT` và `NEAR` mặc định **tắt**, bật riêng trong tray hoặc cửa sổ cài đặt.

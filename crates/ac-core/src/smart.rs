@@ -20,6 +20,7 @@ use crate::corrector::{match_case, Corrector};
 use crate::edits::{bag_distance, edits1, letter_counts, slip_cost, FAR_MAX_COST};
 use crate::lexicon::Lexicon;
 use crate::personal::Personal;
+use crate::student::Student;
 
 mod split;
 
@@ -28,6 +29,8 @@ mod split;
 const UNSEEN_SYLLABLE: f64 = 3.0;
 /// Shorter tokens are too ambiguous to fix.
 const MIN_KEYS: usize = 3;
+/// A word of capitals becomes another word only if that one scores at least this (ln per billion; 9 is ~8000).
+const ACRONYM_FLOOR: f64 = 9.0;
 /// Two-slip corrections are only tried for unknown words at least this long.
 const FAR_MIN_KEYS: usize = 4;
 /// ln(1e9): lexicon frequencies are per billion tokens.
@@ -197,7 +200,26 @@ pub struct SmartCorrector {
     misspellings: HashMap<String, String>,
     /// The user's own words to ignore and replacements, checked before all.
     personal: Personal,
+    /// The learned student that decides the delayed revision when present and on.
+    student: Option<Box<Student>>,
+    student_on: bool,
+    /// Probability of "change" the student must reach to propose a fix.
+    student_tau: f32,
+    /// The fix is chosen among the readings the word statistics find plausible (else: the student's top class).
+    student_restricted: bool,
+    /// Guards against the classes of wrong fixes seen in the journal (see `protected` and `english_phrase`).
+    guards: bool,
+    /// Weight of the word statistics next to the student's probabilities when choosing the fix.
+    student_lambda: f64,
+    /// The fix chosen must carry at least this share of the student's chance of "change".
+    student_min_fix: f32,
+    /// A word the student leaves alone is still given to the word statistics (their delayed revision).
+    student_fallback: bool,
 }
+
+/// Default confidence of the student. On Viwiki-Spelling (RESEARCH.md, section 5) 0.99 corrects about 13% of
+/// the mistakes with about 0.14 wrong changes per 1000 correct words; 0.9 corrects about 21% with about 1.2.
+pub const STUDENT_TAU: f32 = 0.99;
 
 /// Scores behind a decision, for diagnostics.
 #[derive(Debug)]
@@ -256,7 +278,170 @@ impl SmartCorrector {
             tuning: Tuning::default(),
             misspellings: HashMap::new(),
             personal: Personal::default(),
+            student: None,
+            student_on: true,
+            student_tau: STUDENT_TAU,
+            // Student and word statistics together: the student says whether to change, the fix is chosen among the
+            // readings the statistics find plausible (their score weighs in), and what the student leaves alone
+            // goes to the statistics' own delayed revision.
+            student_restricted: true,
+            guards: true,
+            student_lambda: 0.3,
+            student_min_fix: 0.0,
+            student_fallback: true,
         }
+    }
+
+    /// Whether a word the student leaves alone goes on to the word statistics' delayed revision.
+    pub fn set_student_fallback(&mut self, on: bool) {
+        self.student_fallback = on;
+    }
+
+    /// Whether the student's fix must be one of the readings the word statistics find plausible.
+    pub fn set_student_restricted(&mut self, on: bool) {
+        self.student_restricted = on;
+    }
+
+    /// Switches the guards of `protected`, `english_phrase` and the one-letter pieces of a cut on or off
+    /// (for A/B measurements).
+    pub fn set_guards(&mut self, on: bool) {
+        self.guards = on;
+    }
+
+    /// Words that are left alone whatever the statistics say: keys that start with a key no Vietnamese syllable
+    /// starts with ("json" is not "son": j, f and z are tone or foreign letters).
+    fn protected(&self, keys: &str) -> bool {
+        self.guards && keys.starts_with(['j', 'f', 'z'])
+    }
+
+    /// An acronym ("LLM" is not "LL"): a word of capitals is changed only into a word as common as "the" is
+    /// ("TEH", typed with Caps Lock on), never into a rare one.
+    fn acronym_weak(&self, word: &str, score: f64) -> bool {
+        self.guards
+            && word.chars().count() >= 2
+            && word.chars().all(|c| !c.is_lowercase())
+            && word.chars().any(char::is_uppercase)
+            && score < ACRONYM_FLOOR
+    }
+
+    /// The word before is English (and no Vietnamese word) and the one-slip readings include an English word: the
+    /// writer is more likely in English ("vibe codin" is "coding", not "con").
+    fn english_phrase(&self, history: &[&str], near: &[(String, f64)], best: &str) -> bool {
+        let english_only = |w: &str| {
+            let w = w.to_lowercase();
+            self.en.id(&w).is_some() && self.vi.id(&w).is_none()
+        };
+        self.guards
+            && self.english
+            && history.last().is_some_and(|w| english_only(w))
+            && self.vi.id(&best.to_lowercase()).is_some()
+            && near.iter().any(|(w, _)| english_only(w))
+    }
+
+    /// How the fix is chosen among the plausible readings: the weight of the word statistics next to the
+    /// student's probabilities, and the least share of the student's chance of "change" the fix must carry.
+    pub fn set_student_blend(&mut self, lambda: f64, min_fix: f32) {
+        self.student_lambda = lambda;
+        self.student_min_fix = min_fix;
+    }
+
+    /// Adds the learned student: with it, the delayed revision ([`SmartCorrector::revise`]) is decided
+    /// by the student instead of the word statistics.
+    pub fn with_student(mut self, student: Student) -> Self {
+        self.set_student(student);
+        self
+    }
+
+    pub fn set_student(&mut self, student: Student) {
+        self.student = Some(Box::new(student));
+    }
+
+    /// Turns the student on or off (off: the word statistics decide the delayed revision again).
+    pub fn set_student_enabled(&mut self, on: bool) {
+        self.student_on = on;
+    }
+
+    /// The probability of "change" the student must reach to propose a fix (0.5 to 1).
+    pub fn set_student_threshold(&mut self, tau: f32) {
+        self.student_tau = tau.clamp(0.5, 0.999_999);
+    }
+
+    pub fn has_student(&self) -> bool {
+        self.student.is_some()
+    }
+
+    /// Every reading of `word` the word statistics find plausible for what was typed, lower case and
+    /// without the word itself: one slip in the marks or letters, a letter run typed too long, two slips
+    /// for a word that is not a word, and the accented forms of a word typed bare.
+    pub fn revision_candidates(&self, word: &str, history: &[&str]) -> Vec<(String, f64)> {
+        let Some(keys) = Self::keys_of(word) else { return Vec::new() };
+        let (typed, vietnamese) = self.typed(&keys);
+        let shown = vietnamese.clone().unwrap_or_else(|| keys.clone()).to_lowercase();
+        let ctx = self.context_of(history);
+        let mut all: Vec<(String, f64)> = self.candidates(&keys, vietnamese.clone(), ctx, true);
+        if vietnamese.is_some() {
+            all.extend(self.candidates(&keys, vietnamese, ctx, false));
+        }
+        if typed == f64::NEG_INFINITY && keys.len() >= FAR_MIN_KEYS {
+            all.extend(self.far_candidates(&keys, ctx));
+        }
+        if self.vietnamese && self.restore && compose(&keys).text == keys {
+            if let Some(r) = self.rank_bare(&keys, history) {
+                all.extend(r.candidates);
+            }
+        }
+        // Each reading once, with its best score (ln frequency given the words before).
+        let mut best: HashMap<String, f64> = HashMap::new();
+        for (w, s) in all {
+            let w = w.to_lowercase();
+            if w != shown {
+                let e = best.entry(w).or_insert(f64::NEG_INFINITY);
+                *e = e.max(s);
+            }
+        }
+        sorted(best)
+    }
+
+    /// The student's decision for a word and the one typed after it: the fix, or `None`.
+    fn revise_with_student(&self, student: &Student, word: &str, history: &[&str], right: &[String]) -> Option<String> {
+        let keys = Self::keys_of(word)?;
+        let (_, vietnamese) = self.typed(&keys);
+        let shown = vietnamese.unwrap_or_else(|| keys.clone());
+        let lower = shown.to_lowercase();
+        // An English word in the phrase is left alone: the student was not taught mixed text.
+        if self.en.id(&lower).is_some() && self.vi.id(&lower).is_none() {
+            return None;
+        }
+        let window: Vec<&str> = history.iter().copied().chain(std::iter::once(shown.as_str())).chain(right.iter().map(String::as_str)).collect();
+        let probs = student.probs(&window, history.len())?;
+        if 1.0 - probs[0] < self.student_tau {
+            return None;
+        }
+        let fix = if self.student_restricted {
+            // The student says the word is wrong; what it becomes is chosen among the readings the word
+            // statistics find plausible for the keys typed, by the student's own probabilities.
+            // With a weight above zero the word statistics weigh in too: the score of the reading given
+            // the words before, and what the words after it say for it.
+            let finite = |s: f64| if s.is_finite() { s } else { -99.0 };
+            let (fix, p, _) = self
+                .revision_candidates(word, history)
+                .into_iter()
+                .filter_map(|(c, s)| {
+                    let p = student.prob_of(&probs, &c);
+                    if p <= 0.0 {
+                        return None;
+                    }
+                    let vi = self.vietnamese && self.vi.id(&c).is_some();
+                    let ngram = finite(s) + self.right_context_score(vi, history, &c, right);
+                    let score = f64::from(p.max(1e-6)).ln() + self.student_lambda * ngram;
+                    Some((c, p, score))
+                })
+                .max_by(|a, b| a.2.total_cmp(&b.2))?;
+            (p >= self.student_min_fix * (1.0 - probs[0])).then_some(fix)?
+        } else {
+            student.judge(&window, history.len())?.fixes.into_iter().next()?.0
+        };
+        (fix.to_lowercase() != lower).then(|| match_case(&shown, &fix))
     }
 
     pub fn set_personal(&mut self, personal: Personal) {
@@ -461,12 +646,23 @@ impl SmartCorrector {
     }
 
     /// Score of the keys as typed, and their Vietnamese reading if any.
+    /// A word typed with Telex's escape (a tone key pressed twice shows the key: "tesst" shows "test"):
+    /// when what appears is a known English word, the writer meant it.
+    fn escaped_english(&self, keys: &str) -> Option<f64> {
+        let shown = compose(keys);
+        if shown.kind != Kind::Literal || shown.text == keys {
+            return None;
+        }
+        self.en.log_freq(&shown.text).filter(|f| *f >= self.tuning.known_word)
+    }
+
     fn typed(&self, keys: &str) -> (f64, Option<String>) {
         let vietnamese = self.vietnamese_text(keys);
         let score = self
             .readings(keys, true, Context::default())
             .into_iter()
             .map(|(_, f)| f)
+            .chain(self.escaped_english(keys))
             .chain(vietnamese.as_ref().map(|_| UNSEEN_SYLLABLE))
             .fold(f64::NEG_INFINITY, f64::max);
         (score, vietnamese)
@@ -551,7 +747,21 @@ impl SmartCorrector {
         if right.is_empty() || !self.vietnamese || self.personal.ignores(&word.to_lowercase()) {
             return None;
         }
+        if let Some(student) = self.student.as_deref().filter(|_| self.student_on) {
+            let fix = self.revise_with_student(student, word, history, right);
+            // Without the fallback the student alone decides; with it, what the student leaves alone
+            // goes to the word statistics ("that là" -> "thật" is theirs).
+            if fix.is_some() || !self.student_fallback {
+                return fix;
+            }
+        }
         let keys = Self::keys_of(word)?;
+        if self.protected(&keys) {
+            return None;
+        }
+        if self.acronym_weak(word, f64::NEG_INFINITY) {
+            return None;
+        }
         let capital = word.chars().next().is_some_and(char::is_uppercase);
         let (typed_score, vietnamese) = self.typed(&keys);
         // A capitalised word that is known or follows another word is most likely a name.
@@ -806,6 +1016,9 @@ impl Corrector for SmartCorrector {
             return None;
         }
         let keys = Self::keys_of(word)?;
+        if self.protected(&keys) {
+            return None;
+        }
         if self.english {
             if let Some(fix) = self.misspellings.get(&keys) {
                 return Some(match_case(word, fix));
@@ -839,6 +1052,9 @@ impl Corrector for SmartCorrector {
         }
         let t = &self.tuning;
         if let Some(best) = confident(&near, typed_penalised, t.margin, t.floor, t.ambiguity) {
+            if self.english_phrase(history, &near, best) || self.acronym_weak(word, near[0].1) {
+                return None;
+            }
             return Some(match_case(word, best));
         }
         // Keys that are no word and no word's slip: perhaps several words typed without
@@ -855,9 +1071,109 @@ impl Corrector for SmartCorrector {
             if self.unaccented_wins(&far) {
                 return None;
             }
-            return confident(&far, typed, t.margin, t.far_floor, t.far_ambiguity).map(|best| match_case(word, best));
+            return confident(&far, typed, t.margin, t.far_floor, t.far_ambiguity)
+                .filter(|best| !self.english_phrase(history, &far, best) && !self.acronym_weak(word, far[0].1))
+                .map(|best| match_case(word, best));
         }
         None
+    }
+}
+
+/// What `correct_in` weighs for one word, without deciding: the evidence a learned decision can use in
+/// place of the thresholds (the experiment of RESEARCH.md, section 5). `correct_in` stays the reference.
+#[derive(Debug, Clone)]
+pub struct Evidence {
+    /// A fix made before any scoring (the user's dictionary, a known misspelling, marks restored).
+    pub forced: Option<String>,
+    /// Left alone without scoring: ignored, too short, a common word, a name.
+    pub skipped: bool,
+    /// Score of the keys as typed (`-inf`: no known word).
+    pub typed: f64,
+    pub vietnamese: bool,
+    pub capitalised: bool,
+    /// Number of keys of the word.
+    pub keys: usize,
+    /// One-slip candidates, best first, at most six.
+    pub near: Vec<(String, f64)>,
+    /// The best near candidate is the same word without marks, which `correct_in` leaves alone.
+    pub near_unaccented: bool,
+    /// The keys cut into several syllables ("quanheej" -> "quan hệ"), if one cut stands out.
+    pub split: Option<String>,
+    /// Two-slip candidates, only for unknown words, best first, at most six.
+    pub far: Vec<(String, f64)>,
+    pub far_unaccented: bool,
+}
+
+impl Default for Evidence {
+    fn default() -> Self {
+        Self {
+            forced: None,
+            skipped: false,
+            typed: f64::NEG_INFINITY,
+            vietnamese: false,
+            capitalised: false,
+            keys: 0,
+            near: Vec::new(),
+            near_unaccented: false,
+            split: None,
+            far: Vec::new(),
+            far_unaccented: false,
+        }
+    }
+}
+
+impl SmartCorrector {
+    /// The same steps as [`Corrector::correct_in`], stopping where it would compare thresholds.
+    pub fn evidence(&self, word: &str, history: &[&str]) -> Evidence {
+        let mut e = Evidence::default();
+        let lower = word.to_lowercase();
+        if let Some(instead) = self.personal.fix(&lower) {
+            e.forced = Some(match_case(word, instead));
+            return e;
+        }
+        let Some(keys) = Self::keys_of(word).filter(|_| !self.personal.ignores(&lower)) else {
+            e.skipped = true;
+            return e;
+        };
+        e.keys = keys.len();
+        if self.english {
+            if let Some(fix) = self.misspellings.get(&keys) {
+                e.forced = Some(match_case(word, fix));
+                return e;
+            }
+        }
+        if self.vietnamese && self.restore {
+            if let Some(fix) = self.restore_marks(word, &keys, history) {
+                e.forced = Some(fix);
+                return e;
+            }
+        }
+        let (typed, vietnamese) = self.typed(&keys);
+        e.typed = typed;
+        e.vietnamese = vietnamese.is_some();
+        let known = if e.vietnamese { self.tuning.known_syllable } else { self.tuning.known_word };
+        if typed >= known {
+            e.skipped = true;
+            return e;
+        }
+        e.capitalised = word.chars().next().is_some_and(char::is_uppercase);
+        if e.capitalised && (typed > f64::NEG_INFINITY || !history.is_empty()) {
+            e.skipped = true;
+            return e;
+        }
+        let ctx = self.context_of(history);
+        e.near = self.candidates(&keys, vietnamese, ctx, true);
+        e.near_unaccented = self.unaccented_wins(&e.near);
+        e.near.truncate(6);
+        if typed == f64::NEG_INFINITY {
+            e.split = self.split_run(&keys, history);
+            if !e.capitalised && keys.len() >= FAR_MIN_KEYS {
+                let far = self.far_candidates(&keys, ctx);
+                e.far_unaccented = self.unaccented_wins(&far);
+                e.far = far.into_iter().take(6).collect();
+            }
+        }
+        e
     }
 }
 
@@ -1004,6 +1320,61 @@ mod tests {
         }
     }
 
+    /// English words typed through Telex's "press the tone key twice" escape, as in the user's journal:
+    /// `cargo test -p ac-core probe_telex_escapes -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn probe_telex_escapes() {
+        let c = corrector();
+        for keys in ["tesst", "casse", "json", "roff", "boff", "iff", "jsont", "thatj", "khooong", "banjj"] {
+            let composed = compose(keys);
+            println!("{keys:<8} shows {:<8} ({:?})  corrected to {:?}", composed.text, composed.kind, c.correct_in(keys, &["bạn", "ơi"]));
+        }
+    }
+
+    /// An English word typed through Telex's escape (a tone key pressed twice) is what the writer meant,
+    /// not a Vietnamese word to be restored (journal 2026-10-07: "tesst" -> "tết" ten times).
+    #[test]
+    fn an_escaped_english_word_is_left_alone() {
+        let c = corrector();
+        for keys in ["tesst", "casse", "iff"] {
+            assert_eq!(c.correct_in(keys, &["bạn", "ơi"]), None, "{keys}");
+            assert_eq!(c.correct_in(keys, &[]), None, "{keys}");
+        }
+        // Telex words and plain typos are still corrected.
+        assert_eq!(c.correct_in("thatj", &[]).as_deref(), Some("thật"));
+        assert_eq!(c.correct_in("banjj", &["bạn", "ơi"]).as_deref(), Some("bạn"));
+    }
+
+    /// Wrong fixes seen in the journal (2026-10-08, AUGMENT_RULES.md F2 and F3): an acronym, keys that start
+    /// with j, an English word after an English word, one word cut in two with a one-letter piece.
+    #[test]
+    fn guards_keep_journal_wrong_fixes_away() {
+        let c = corrector();
+        assert_eq!(c.correct_in("json", &[]), None);
+        assert_eq!(c.correct_in("LLM", &[]), None);
+        assert_eq!(c.correct_in("Tiees", &[]), None);
+        assert_eq!(c.correct_in("tiees", &[]), None);
+        assert_eq!(c.correct_in("Giowow", &[]), None);
+        assert_eq!(c.correct_in("codin", &["vibe"]), None);
+        // What they must not cost: a word of capitals typed with Caps Lock, a cut into real syllables.
+        assert_eq!(c.correct_in("TEH", &[]).as_deref(), Some("THE"));
+        assert_eq!(c.correct_in("quanheej", &[]).as_deref(), Some("quan hệ"));
+    }
+
+    /// A letter typed twice or three times, with and without the word after it:
+    /// `cargo test -p ac-core probe_repeated_letters -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn probe_repeated_letters() {
+        let c = corrector();
+        for typed in ["nguu", "nguuu", "ngguu", "ngoocc"] {
+            let history = ["con", "vịt"];
+            let right = vec!["ngốc".to_string()];
+            println!("{typed:<8} now: {:?}   revised with 'ngốc': {:?}", c.correct_in(typed, &history), c.revise(typed, &history, &right));
+        }
+    }
+
     /// Delayed revision: the word after it settles what a word could not say alone.
     #[test]
     fn revises_a_word_once_the_next_one_is_known() {
@@ -1078,6 +1449,30 @@ mod tests {
         assert_eq!(e.context(), Some("hệ"));
         assert_eq!(e.history().last().map(String::as_str), Some("hệ"));
         assert!(matches!(e.on_key(Key::Undo), Action::Replace { .. }));
+    }
+
+    /// `evidence` and `correct_in` agree: what one calls skipped the other leaves alone, a forced fix is
+    /// the fix, and any other fix is one of the candidates listed.
+    #[test]
+    fn evidence_agrees_with_correct_in() {
+        let c = corrector();
+        let histories: [&[&str]; 3] = [&[], &["tôi"], &["chúng", "ta"]];
+        for word in ["teh", "quanheej", "nhieeu", "khong", "Tuan", "the", "chaof", "xin", "thicsk", "Wolff", "that", "ngẫy", "cuar", "dduowcj", "recieve"] {
+            for history in histories {
+                let e = c.evidence(word, history);
+                let fix = c.correct_in(word, history);
+                if let Some(forced) = &e.forced {
+                    assert_eq!(fix.as_ref(), Some(forced), "{word}");
+                } else if e.skipped {
+                    assert_eq!(fix, None, "{word} {history:?}");
+                } else if let Some(fix) = fix {
+                    let lower = fix.to_lowercase();
+                    let listed = e.near.iter().chain(&e.far).any(|(w, _)| w.to_lowercase() == lower)
+                        || e.split.as_ref().is_some_and(|s| s.to_lowercase() == lower);
+                    assert!(listed, "{word} {history:?}: {fix:?} is not in {e:?}");
+                }
+            }
+        }
     }
 
     /// The hard-case journal: a word left alone with two close readings is

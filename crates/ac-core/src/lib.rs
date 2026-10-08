@@ -12,6 +12,7 @@ mod kn;
 mod lexicon;
 mod personal;
 mod smart;
+mod student;
 
 pub use trigrams::Trigrams;
 pub use bigrams::{Bigrams, HELD_OUT_SENTENCES};
@@ -20,4 +21,5 @@ pub use engine::{Action, Decision, Engine, Key};
 pub use kn::Kn;
 pub use lexicon::Lexicon;
 pub use personal::Personal;
-pub use smart::{Ranking, SmartCorrector, Tuning};
+pub use smart::{Evidence, Ranking, SmartCorrector, Tuning, STUDENT_TAU};
+pub use student::{Judgement, Student};

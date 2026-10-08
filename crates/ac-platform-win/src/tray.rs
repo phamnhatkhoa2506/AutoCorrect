@@ -50,6 +50,7 @@ const ID_EDITS: usize = 12;
 const ID_HARD: usize = 13;
 const ID_DELAYED: usize = 14;
 const ID_RIGHT: usize = 15;
+const ID_STUDENT: usize = 16;
 
 thread_local! {
     static WINDOW: Cell<HWND> = Cell::new(HWND::default());
@@ -158,6 +159,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             ID_HARD => hook::update(|s| s.journal_hard = !s.journal_hard),
             ID_RIGHT => hook::update(|s| s.journal_right = !s.journal_right),
             ID_DELAYED => hook::update(|s| s.delayed = !s.delayed),
+            ID_STUDENT => hook::update(|s| s.student = !s.student),
             ID_CODE_ENGLISH => hook::update(|s| s.code_english = !s.code_english),
             ID_GUARD => hook::update(|s| s.autocomplete_guard = !s.autocomplete_guard),
             ID_RESTORE => hook::update(|s| s.restore_marks = !s.restore_marks),
@@ -180,7 +182,7 @@ unsafe fn show_menu(hwnd: HWND) {
     let Ok(menu) = CreatePopupMenu() else { return };
     let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
     let vietnamese = HSTRING::from(format!("Tiếng Việt (Telex)\t{}", s.hotkey));
-    let items: [(usize, PCWSTR, bool); 12] = [
+    let items: [(usize, PCWSTR, bool); 13] = [
         (ID_VIETNAMESE, PCWSTR(vietnamese.as_ptr()), s.vietnamese),
         (ID_CORRECTIONS, w!("Tự sửa lỗi gõ"), s.corrections),
         (ID_PAUSED, w!("Tạm dừng"), s.paused),
@@ -188,6 +190,7 @@ unsafe fn show_menu(hwnd: HWND) {
         (ID_CODE_ENGLISH, w!("Sửa lỗi tiếng Anh cả trong IDE/terminal"), s.code_english),
         (ID_RESTORE, w!("Tự thêm dấu khi gõ không dấu (khong → không)"), s.restore_marks),
         (ID_DELAYED, w!("Sửa muộn khi đã gõ từ kế tiếp (thử nghiệm)"), s.delayed),
+        (ID_STUDENT, w!("    Dùng mô hình học + n-gram cho sửa muộn (cần student.acs)"), s.student),
         (ID_GUARD, w!("Chống lỗi gợi ý trong trình duyệt/ô tìm kiếm"), s.autocomplete_guard),
         (ID_JOURNAL, w!("Ghi nhật ký sửa lỗi (để tinh chỉnh)"), s.journal),
         (ID_EDITS, w!("Ghi chữ bạn tự sửa tay (để học)"), s.journal_edits),

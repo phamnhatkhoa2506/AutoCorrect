@@ -754,6 +754,215 @@ fn run_audit(corrector: &SmartCorrector, cases: &[Case], right_typo: f64, langua
     );
 }
 
+/// What a mistake of the Viwiki set is, by how the right word differs from it.
+fn viwiki_kind(mistake: &str, right: Option<&str>) -> &'static str {
+    let (m, r) = (mistake.to_lowercase(), right.unwrap_or("").to_lowercase());
+    if right.is_none() {
+        "no suggestion"
+    } else if r.contains(' ') || m.contains(' ') {
+        "space"
+    } else if bare(&m) == bare(&r) {
+        "marks or tone only"
+    } else if m.chars().count().abs_diff(r.chars().count()) <= 1 {
+        "one letter"
+    } else {
+        "other"
+    }
+}
+
+/// An outside yardstick (`--viwiki [file] [--docs N] [--show N] [--right N]`): the Viwiki-Spelling test
+/// set of Tran et al. (2021), real spelling mistakes in 107 Wikipedia articles with the
+/// right words annotated (data/ATTRIBUTION.md). Every word goes to the corrector as the
+/// app would see it once typed, with the words before it in the phrase (and, for the
+/// delayed pass, the word after it); a word it changes counts as "detected" when it is an
+/// annotated mistake and "right" when it becomes one of the annotated corrections.
+///
+/// This is text that was written, not keys that were typed: it says how the corrector
+/// does on real mistakes of words that are valid on their own ("hát" for "hán"), not
+/// how it does on slips of the keyboard. Only the annotated mistakes count, so a change
+/// to a word nobody annotated may be a real mistake the set missed.
+fn viwiki(corrector: &SmartCorrector, path: &Path, docs: usize, show: usize, right_words: usize) {
+    use serde_json::Value;
+    use std::collections::BTreeMap;
+
+    /// Counts of one way of running the corrector.
+    #[derive(Default)]
+    struct Score {
+        changed: u32,
+        detected: u32,
+        right: u32,
+        /// mistake kind -> (mistakes, made right)
+        kinds: BTreeMap<&'static str, (u32, u32)>,
+        false_changes: Vec<String>,
+        missed: Vec<String>,
+    }
+
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    // 0: the word on its own side (immediate), 1: after the next word (delayed), 2: both as the app does
+    let mut scores: [Score; 3] = Default::default();
+    let (mut tokens_total, mut mistakes_total, mut misaligned) = (0u32, 0u32, 0u32);
+    let started = Instant::now();
+    for line in text.lines().take(docs) {
+        let Ok(doc) = serde_json::from_str::<Value>(line) else { continue };
+        let body: Vec<char> = doc["text"].as_str().unwrap_or("").chars().collect();
+        // start (in characters) -> (word, right words)
+        let mut mistakes: HashMap<usize, (String, Vec<String>)> = HashMap::new();
+        for m in doc["mistakes"].as_array().into_iter().flatten() {
+            let start = match &m["start_offset"] {
+                Value::Number(n) => n.as_u64().map(|n| n as usize),
+                Value::String(s) => s.parse().ok(),
+                _ => None,
+            };
+            let word = m["text"].as_str().unwrap_or("").to_string();
+            let suggest: Vec<String> = m["suggest"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(String::from)).collect();
+            if let Some(start) = start {
+                mistakes.insert(start, (word, suggest));
+            }
+        }
+        // Words (runs of letters) and the phrase each belongs to: anything else between
+        // two words (punctuation, a digit, a new line) ends the phrase.
+        let mut words: Vec<(usize, String, usize)> = Vec::new();
+        let (mut phrase, mut i) = (0usize, 0usize);
+        while i < body.len() {
+            if body[i].is_alphabetic() {
+                let from = i;
+                while i < body.len() && body[i].is_alphabetic() {
+                    i += 1;
+                }
+                words.push((from, body[from..i].iter().collect(), phrase));
+            } else {
+                if !body[i].is_whitespace() || body[i] == '\n' {
+                    phrase += 1;
+                }
+                i += 1;
+            }
+        }
+        misaligned += mistakes.iter().filter(|(start, (word, _))| !words.iter().any(|(s, w, _)| s == *start && w == word)).count() as u32;
+        for (n, (start, word, phrase)) in words.iter().enumerate() {
+            let history: Vec<&str> = words[n.saturating_sub(4)..n].iter().filter(|(_, _, p)| p == phrase).map(|(_, w, _)| w.as_str()).collect();
+            let right: Vec<String> = words[n + 1..].iter().take(right_words).take_while(|(_, _, p)| p == phrase).map(|(_, w, _)| w.clone()).collect();
+            let keys = to_keys(word);
+            let immediate = corrector.correct_in(&keys, &history);
+            let delayed = corrector.revise(&keys, &history, &right);
+            let both = immediate.clone().or_else(|| delayed.clone());
+            let mistake = mistakes.get(start).filter(|(w, _)| w == word);
+            tokens_total += 1;
+            mistakes_total += u32::from(mistake.is_some());
+            for (score, out) in scores.iter_mut().zip([immediate, delayed, both]) {
+                let out = out.filter(|o| o != word);
+                let right_now = out.as_deref().is_some_and(|o| mistake.is_some_and(|(_, s)| s.iter().any(|s| s.to_lowercase() == o.to_lowercase())));
+                if let Some((_, suggest)) = mistake {
+                    let kind = viwiki_kind(word, suggest.first().map(String::as_str));
+                    let e = score.kinds.entry(kind).or_default();
+                    e.0 += 1;
+                    e.1 += u32::from(right_now);
+                    if out.is_none() && score.missed.len() < show {
+                        score.missed.push(format!("{word} (want {})", suggest.first().map_or("?", String::as_str)));
+                    }
+                }
+                if let Some(o) = &out {
+                    score.changed += 1;
+                    score.detected += u32::from(mistake.is_some());
+                    score.right += u32::from(right_now);
+                    if mistake.is_none() && score.false_changes.len() < show {
+                        let before = history.last().copied().unwrap_or("");
+                        let after = right.first().map_or("", String::as_str);
+                        score.false_changes.push(format!("{before} [{word} -> {o}] {after}"));
+                    }
+                }
+            }
+        }
+    }
+    let pct = |a: u32, b: u32| 100.0 * f64::from(a) / f64::from(b.max(1));
+    println!("Viwiki-Spelling: {tokens_total} words, {mistakes_total} annotated mistakes ({} annotations not at a word of the same text), {:.1}s", misaligned, started.elapsed().as_secs_f64());
+    println!("{:<22}{:>8}{:>10}{:>10}{:>10}{:>10}{:>8}{:>14}", "", "changed", "detect-P", "detect-R", "right-P", "right-R", "F1", "other /1000");
+    for (name, s) in ["immediate", "delayed (next word)", "both, as the app"].into_iter().zip(&scores) {
+        let (p, r) = (pct(s.right, s.changed), pct(s.right, mistakes_total));
+        println!(
+            "{name:<22}{:>8}{:>9.1}%{:>9.1}%{:>9.1}%{:>9.1}%{:>8.1}{:>14.2}",
+            s.changed,
+            pct(s.detected, s.changed),
+            pct(s.detected, mistakes_total),
+            p,
+            r,
+            if p + r > 0.0 { 2.0 * p * r / (p + r) } else { 0.0 },
+            1000.0 * f64::from(s.changed - s.detected) / f64::from((tokens_total - mistakes_total).max(1))
+        );
+    }
+    println!("\nmade right, by kind of mistake:     mistakes   immediate   delayed   both");
+    let kinds: Vec<&&str> = scores[2].kinds.keys().collect();
+    for kind in kinds {
+        let get = |i: usize| scores[i].kinds.get(*kind).copied().unwrap_or_default();
+        println!("  {:<30}{:>8}{:>10.1}%{:>9.1}%{:>7.1}%", kind, get(2).0, pct(get(0).1, get(0).0), pct(get(1).1, get(1).0), pct(get(2).1, get(2).0));
+    }
+    if show > 0 {
+        println!("\nchanged words that are not annotated mistakes (both): maybe wrong, maybe unannotated");
+        for line in &scores[2].false_changes {
+            println!("  {line}");
+        }
+        println!("\nmistakes left alone (both):");
+        for line in &scores[2].missed {
+            println!("  {line}");
+        }
+    }
+}
+
+/// The evidence behind the decision for every case of a file, next to what `correct_in` decides at
+/// several margins (`--evidence cases.tsv out.tsv [--margins 1.5,2.5,3.5]`). For the experiment of a
+/// learned decision (RESEARCH.md, section 5); `tools/combiner/` builds the cases and reads this file.
+///
+/// Input columns, tab separated: `source id history typed gold is_error` (history: the words before,
+/// space separated). Output columns: the first five as they came, then `keys vi cap skipped forced typed
+/// near_unaccented far_unaccented split`, one `correct_in` output per margin, `near` and `far` (as
+/// `word:score` joined by `|`).
+fn evidence_export(corrector: &mut SmartCorrector, tuning: Tuning, input: &Path, output: &Path, margins: &[f64]) {
+    use std::io::Write;
+    let text = fs::read_to_string(input).unwrap_or_else(|e| panic!("{}: {e}", input.display()));
+    let mut out = std::io::BufWriter::new(fs::File::create(output).expect("evidence file"));
+    let list = |c: &[(String, f64)]| c.iter().map(|(w, s)| format!("{w}:{s:.3}")).collect::<Vec<_>>().join("|");
+    let started = Instant::now();
+    let mut rows = 0u32;
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let [source, id, history, typed, gold, is_error] = f[..] else { continue };
+        let history: Vec<&str> = history.split_whitespace().collect();
+        let keys = to_keys(typed);
+        corrector.set_tuning(tuning);
+        let e = corrector.evidence(&keys, &history);
+        let mut base = Vec::with_capacity(margins.len());
+        for &m in margins {
+            let fix = match (&e.forced, e.skipped) {
+                (Some(forced), _) => Some(forced.clone()),
+                (None, true) => None,
+                _ => {
+                    corrector.set_tuning(Tuning { margin: m, ..tuning });
+                    corrector.correct_in(&keys, &history)
+                }
+            };
+            base.push(fix.unwrap_or_default());
+        }
+        writeln!(
+            out,
+            "{source}\t{id}\t{typed}\t{gold}\t{is_error}\t{}\t{}\t{}\t{}\t{}\t{:.3}\t{}\t{}\t{}\t{}\t{}\t{}",
+            e.keys,
+            u8::from(e.vietnamese),
+            u8::from(e.capitalised),
+            u8::from(e.skipped),
+            e.forced.as_deref().unwrap_or(""),
+            e.typed,
+            u8::from(e.near_unaccented),
+            u8::from(e.far_unaccented),
+            e.split.as_deref().unwrap_or(""),
+            base.join("\t"),
+            list(&e.near),
+            list(&e.far)
+        )
+        .expect("write evidence");
+        rows += 1;
+    }
+    println!("{rows} cases -> {} ({:.1}s)", output.display(), started.elapsed().as_secs_f64());
+}
+
 fn json_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -926,9 +1135,53 @@ fn main() {
         .with_kn(vi_kn, en_kn)
         .with_misspellings(&misspellings);
     corrector.set_tuning(tuning);
+    corrector.set_guards(!args.iter().any(|a| a == "--no-guards"));
+    // `--student [file] [--student-tau 0.99]`: the learned student decides the delayed revision.
+    if let Some(i) = args.iter().position(|a| a == "--student") {
+        let path = args.get(i + 1).filter(|a| !a.starts_with("--")).map(PathBuf::from).unwrap_or_else(|| root.join("models/student.acs"));
+        let bytes = fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let student = ac_core::Student::from_bytes(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        corrector = corrector.with_student(student);
+        corrector.set_student_threshold(flag("--student-tau", f64::from(ac_core::STUDENT_TAU)) as f32);
+        println!("student {} at tau {}", path.display(), flag("--student-tau", f64::from(ac_core::STUDENT_TAU)));
+        // `--student-free`: the fix is the student's top class, not chosen among the plausible readings.
+        corrector.set_student_restricted(!args.iter().any(|a| a == "--student-free"));
+        corrector.set_student_fallback(args.iter().any(|a| a == "--student-fallback"));
+        corrector.set_student_blend(flag("--student-lambda", 0.0), flag("--student-min-fix", 0.02) as f32);
+    }
+    // `--revise "history words" typed right words...`: what the immediate and the delayed pass do with a word.
+    if let Some(i) = args.iter().position(|a| a == "--revise") {
+        let history: Vec<&str> = args.get(i + 1).map(|h| h.split_whitespace().collect()).unwrap_or_default();
+        let typed = args.get(i + 2).expect("usage: --revise \"history words\" typed [right words]");
+        let right: Vec<String> = args[i + 3..].iter().take_while(|a| !a.starts_with("--")).cloned().collect();
+        let keys = to_keys(typed);
+        println!("{} [{typed}] {}", history.join(" "), right.join(" "));
+        println!("immediate: {:?}", corrector.correct_in(&keys, &history));
+        println!("delayed:   {:?}", corrector.revise(&keys, &history, &right));
+        println!("plausible readings: {:?}", corrector.revision_candidates(&keys, &history));
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--golden") {
         let path = args.get(i + 1).filter(|a| !a.starts_with("--")).map(PathBuf::from).unwrap_or_else(|| root.join("bench/golden.tsv"));
         std::process::exit(if golden(&mut corrector, &path) { 0 } else { 1 });
+    }
+    if let Some(i) = args.iter().position(|a| a == "--evidence") {
+        let [Some(input), Some(output)] = [1, 2].map(|k| args.get(i + k).filter(|a| !a.starts_with("--")).map(PathBuf::from)) else {
+            panic!("usage: --evidence cases.tsv out.tsv [--margins 1.5,2.5,3.5]");
+        };
+        let margins: Vec<f64> = args
+            .iter()
+            .position(|a| a == "--margins")
+            .and_then(|j| args.get(j + 1))
+            .map_or_else(|| vec![tuning.margin], |v| v.split(',').filter_map(|m| m.parse().ok()).collect());
+        evidence_export(&mut corrector, tuning, &input, &output, &margins);
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--viwiki") {
+        let path = args.get(i + 1).filter(|a| !a.starts_with("--")).map(PathBuf::from).unwrap_or_else(|| root.join("data/raw/viwiki_spelling/spelling_test.json"));
+        println!("{tuning:?}");
+        viwiki(&corrector, &path, flag("--docs", 1000.0) as usize, show, flag("--right", 1.0) as usize);
+        return;
     }
     println!("{tuning:?}");
 

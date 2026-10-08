@@ -47,6 +47,10 @@ impl SmartCorrector {
                         continue;
                     }
                     let (Some(id), Some(f)) = (self.vi.id(&c.text), self.vi.log_freq(&c.text)) else { continue };
+                    // A piece of one letter ("ế", "ơ") is how one word with a slip gets cut in two ("tiees" -> "ti ế").
+                    if self.guards && c.text.chars().count() < 2 {
+                        continue;
+                    }
                     if f < t.split_floor {
                         continue;
                     }

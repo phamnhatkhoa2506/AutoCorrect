@@ -37,6 +37,15 @@ pub fn apps_path() -> Option<PathBuf> {
     file("apps.tsv")
 }
 
+/// The learned student (`tools/student/export_student.py`), read when delayed revision is on.
+/// `AUTOCORRECT_STUDENT` overrides the path; otherwise the config folder, then next to the program.
+pub fn student_paths() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = std::env::var_os("AUTOCORRECT_STUDENT").map(PathBuf::from).into_iter().collect();
+    out.extend(file("student.acs"));
+    out.extend(std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("student.acs"))));
+    out
+}
+
 /// Corrections and undos, when the user turned the journal on.
 pub fn journal_path() -> Option<PathBuf> {
     file("journal.tsv")

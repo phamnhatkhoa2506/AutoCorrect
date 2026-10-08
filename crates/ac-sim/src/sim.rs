@@ -197,19 +197,39 @@ impl Sim {
         self.starts_plain.push(self.plain.screen.words().len());
     }
 
-    /// Where a run of 2 to `join_max` Vietnamese words typed without spaces starts, and
-    /// its length, if this sentence gets one.
-    fn pick_run(&mut self, plan: &[Token]) -> Option<(usize, usize)> {
+    /// The runs of 2 to `join_max` words typed without the spaces between them that this sentence gets: where each
+    /// starts, how many words it has, and whether they are all Vietnamese syllables. The words may be of any kind
+    /// (Vietnamese, English, names, numbers); only a single space, no punctuation, lies between two words of a run;
+    /// two runs never touch (a space stays between them).
+    fn pick_runs(&mut self, plan: &[Token]) -> Vec<(usize, usize, bool)> {
+        let mut runs: Vec<(usize, usize, bool)> = Vec::new();
         if self.profile.join <= 0.0 || !self.rng.chance(self.profile.join) {
-            return None;
+            return runs;
         }
-        let vi = |i: usize| matches!(plan.get(i), Some(Token::Word { vietnamese: true, .. }));
-        // How many Vietnamese words follow each other, a single space apart, from `i`.
-        let reach = |i: usize| (0..).take_while(|n| vi(i + 2 * n) && (plan.get(i + 2 * n + 1) == Some(&Token::Space) || !vi(i + 2 * n + 2))).count();
-        let starts: Vec<(usize, usize)> =
-            (0..plan.len()).map(|i| (i, reach(i).min(self.profile.join_max))).filter(|&(_, k)| k >= 2).collect();
-        let (at, longest) = *starts.get(self.rng.below(starts.len().max(1)))?;
-        Some((at, 2 + self.rng.below(longest - 1)))
+        // How many words follow each other, a single space apart, from `i`.
+        let reach = |i: usize| {
+            (0..)
+                .take_while(|n| matches!(plan.get(i + 2 * n), Some(Token::Word { .. })) && (*n == 0 || plan.get(i + 2 * n - 1) == Some(&Token::Space)))
+                .count()
+        };
+        let mut free = 0; // the first index where a new run may start
+        loop {
+            let starts: Vec<(usize, usize)> =
+                (free..plan.len()).map(|i| (i, reach(i).min(self.profile.join_max))).filter(|&(_, k)| k >= 2).collect();
+            let Some(&(at, longest)) = starts.get(self.rng.below(starts.len().max(1))) else { break };
+            // Long-tailed: two words, and each word more with a fixed chance, as far as the words and `join_max` allow.
+            let mut k = 2;
+            while k < longest && self.rng.chance(self.profile.join_continue) {
+                k += 1;
+            }
+            let all_vietnamese = (0..k).all(|n| matches!(plan[at + 2 * n], Token::Word { vietnamese: true, .. }));
+            runs.push((at, k, all_vietnamese));
+            free = at + 2 * k;
+            if runs.len() >= self.profile.join_runs || !self.rng.chance(self.profile.join_more) {
+                break;
+            }
+        }
+        runs
     }
 
     /// A key to both lanes; what the app's engine did.
@@ -227,28 +247,32 @@ impl Sim {
         self.starts_main.clear();
         self.starts_plain.clear();
         let mut words: Vec<WordResult> = Vec::new();
-        // Now and then the spaces between a run of Vietnamese words are left out.
-        let join = self.pick_run(plan);
+        // Now and then the spaces inside runs of words are left out, and a run may carry a slip of its own.
+        let joins = self.pick_runs(plan);
         let mut i = 0;
         while i < plan.len() {
-            if let Some((at, k)) = join {
-                if at == i {
-                    let run: Vec<(&String, &String)> = (0..k)
-                        .filter_map(|n| match &plan[i + 2 * n] {
-                            Token::Word { text, keys, .. } => Some((text, keys)),
-                            _ => None,
-                        })
-                        .collect();
-                    let typed: String = run.iter().map(|(_, keys)| keys.as_str()).collect();
-                    self.word_begins();
-                    for c in typed.chars() {
-                        self.press(Key::Char(c), Some(c));
+            if let Some(&(_, k, all_vietnamese)) = joins.iter().find(|r| r.0 == i) {
+                let run: Vec<(&String, &String)> = (0..k)
+                    .filter_map(|n| match &plan[i + 2 * n] {
+                        Token::Word { text, keys, .. } => Some((text, keys)),
+                        _ => None,
+                    })
+                    .collect();
+                let mut typed: String = run.iter().map(|(_, keys)| keys.as_str()).collect();
+                if self.rng.chance(self.profile.join_slip) {
+                    if let Some((_, slipped)) = self.profile.slip(&typed, all_vietnamese, &mut self.rng) {
+                        typed = slipped;
                     }
-                    let meant = run.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
-                    words.push(WordResult::typed(meant, typed, Some(Slip::SpaceMissing), false));
-                    i += 2 * k - 1;
-                    continue;
                 }
+                self.word_begins();
+                for c in typed.chars() {
+                    self.press(Key::Char(c), Some(c));
+                }
+                let meant = run.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
+                let kind = if all_vietnamese { Slip::SpaceMissing } else { Slip::SpaceMissingMixed };
+                words.push(WordResult::typed(meant, typed, Some(kind), false));
+                i += 2 * k - 1;
+                continue;
             }
             match &plan[i] {
                 Token::Word { text, keys, vietnamese } => {
@@ -373,8 +397,8 @@ pub struct Tally {
     /// Per slip kind (`None`: no slip, yet the word as typed was not the word
     /// meant: Telex changed it, as with English words typed in Vietnamese mode).
     pub by_slip: BTreeMap<Option<Slip>, BTreeMap<Outcome, u32>>,
-    /// Runs of words typed without spaces, by the number of words in the run.
-    pub by_run: BTreeMap<usize, BTreeMap<Outcome, u32>>,
+    /// Runs of words typed without spaces, by (all of them Vietnamese syllables, number of words in the run).
+    pub by_run: BTreeMap<(bool, usize), BTreeMap<Outcome, u32>>,
     pub typist_fixed: u32,
     pub undone: u32,
 }
@@ -384,9 +408,9 @@ impl Tally {
         *self.outcomes.entry(w.outcome).or_default() += 1;
         // Only words still wrong when they were ended: one the typist fixed is not
         // the app's to fix.
-        if w.slip == Some(Slip::SpaceMissing) {
+        if matches!(w.slip, Some(Slip::SpaceMissing | Slip::SpaceMissingMixed)) {
             let k = w.intended.split(' ').count();
-            *self.by_run.entry(k).or_default().entry(w.outcome).or_default() += 1;
+            *self.by_run.entry((w.slip == Some(Slip::SpaceMissing), k)).or_default().entry(w.outcome).or_default() += 1;
         }
         if w.baseline != w.intended {
             *self.by_slip.entry(w.slip).or_default().entry(w.outcome).or_default() += 1;
@@ -416,7 +440,7 @@ mod tests {
     }
 
     fn quiet() -> Profile {
-        Profile { rate: 0.0, wrap: 0.0, join: 0.0, ..Profile::default() }
+        Profile { rate: 0.0, wrap: 0.0, join: 0.0, join_more: 0.0, join_slip: 0.0, ..Profile::default() }
     }
 
     fn outcomes(typed: Typed) -> Vec<(String, Outcome)> {
@@ -452,5 +476,64 @@ mod tests {
         assert_eq!(joined.len(), 1);
         assert!(["mối quan", "quan hệ", "mối quan hệ"].contains(&joined[0].intended.as_str()));
         assert!(words.len() <= 2);
+    }
+
+    fn words_of(typed: Typed) -> Vec<WordResult> {
+        let Typed::Words(words) = typed else { panic!("misaligned") };
+        words
+    }
+
+    #[test]
+    fn a_run_may_hold_english_words_and_is_counted_apart() {
+        let mut s = sim(Profile { join: 1.0, join_max: 4, ..quiet() });
+        let plan = plan("mình train model").unwrap();
+        let joined: Vec<_> = words_of(s.type_sentence(&plan)).into_iter().filter(|w| w.intended.contains(' ')).collect();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].slip, Some(Slip::SpaceMissingMixed));
+        assert!(joined[0].keys == joined[0].intended.replace(' ', "").replace("mình", "minhf"), "{:?}", joined[0]);
+    }
+
+    #[test]
+    fn runs_of_two_to_four_words_all_come_up() {
+        let mut s = sim(Profile { join: 1.0, join_max: 4, ..quiet() });
+        let plan = plan("mối quan hệ này rất quan trọng với mọi người").unwrap();
+        let mut lengths = std::collections::BTreeSet::new();
+        for _ in 0..200 {
+            for w in words_of(s.type_sentence(&plan)) {
+                if w.slip == Some(Slip::SpaceMissing) {
+                    lengths.insert(w.intended.split(' ').count());
+                }
+            }
+        }
+        assert_eq!(lengths.into_iter().collect::<Vec<_>>(), vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn a_sentence_may_get_several_runs_that_do_not_touch() {
+        let mut s = sim(Profile { join: 1.0, join_max: 2, join_more: 1.0, join_runs: 3, ..quiet() });
+        let plan = plan("tôi đi chơi với bạn rất vui vì trời đẹp quá").unwrap();
+        let mut most = 0;
+        for _ in 0..100 {
+            let words = words_of(s.type_sentence(&plan));
+            let runs = words.iter().filter(|w| w.slip == Some(Slip::SpaceMissing)).count();
+            most = most.max(runs);
+            // two runs never touch: the words between them are typed as usual, so a space stays
+            assert!(words.iter().filter(|w| w.slip != Some(Slip::SpaceMissing)).count() >= runs.saturating_sub(1));
+        }
+        assert!(most >= 2, "never more than {most} run");
+    }
+
+    #[test]
+    fn a_run_can_carry_a_slip_of_its_own() {
+        let mut s = sim(Profile { join: 1.0, join_max: 2, join_slip: 1.0, ..quiet() });
+        let plan = plan("quan hệ").unwrap();
+        let clean = "quanheej";
+        let mut changed = 0;
+        for _ in 0..40 {
+            let joined: Vec<_> = words_of(s.type_sentence(&plan)).into_iter().filter(|w| w.slip == Some(Slip::SpaceMissing)).collect();
+            assert_eq!(joined.len(), 1);
+            changed += usize::from(joined[0].keys != clean);
+        }
+        assert!(changed >= 30, "only {changed} of 40 runs carried a slip");
     }
 }

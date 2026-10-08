@@ -52,9 +52,54 @@ struct State {
     /// Keys typed while the focus check was pending (not composed), since the last log line.
     observed_keys: u32,
     observed_logged: Option<Instant>,
+    /// The learned student is read on a thread of its own (56 MB, too slow for a keyboard hook).
+    student: StudentLoad,
+}
+
+enum StudentLoad {
+    NotTried,
+    Loading(std::sync::mpsc::Receiver<Result<ac_core::Student, String>>),
+    Done,
 }
 
 impl State {
+    /// Starts reading the student file the first time delayed revision and the student are both on.
+    fn start_student(&mut self) {
+        if !matches!(self.student, StudentLoad::NotTried) || !(self.settings.delayed && self.settings.student) {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut last = "no student file found".to_string();
+            for path in ac_config::paths::student_paths() {
+                let Ok(bytes) = std::fs::read(&path) else { continue };
+                match ac_core::Student::from_bytes(&bytes) {
+                    Ok(student) => {
+                        let _ = tx.send(Ok(student));
+                        return;
+                    }
+                    Err(e) => last = format!("{}: {e}", path.display()),
+                }
+            }
+            let _ = tx.send(Err(last));
+        });
+        self.student = StudentLoad::Loading(rx);
+    }
+
+    /// Takes the student once its thread is done.
+    fn finish_student(&mut self) {
+        let StudentLoad::Loading(rx) = &self.student else { return };
+        let Ok(result) = rx.try_recv() else { return };
+        match result {
+            Ok(student) => {
+                self.engine.corrector_mut().set_student(student);
+                log::event("student loaded: delayed revision uses it".into());
+            }
+            Err(why) => log::event(format!("student not used ({why}): delayed revision uses the word statistics")),
+        }
+        self.student = StudentLoad::Done;
+    }
+
     /// Writes the journal lines that wait for words still to come: the text around
     /// them is about to be lost.
     fn flush_journal(&mut self) {
@@ -79,6 +124,21 @@ impl State {
         // Terminals and code would have identifiers rewritten.
         self.engine.set_restore_marks(s.corrections && s.restore_marks && self.app == AppKind::Normal);
         self.engine.corrector_mut().set_tuning(Tuning::preset(s.strength.level()));
+        self.start_student();
+        let corrector = self.engine.corrector_mut();
+        corrector.set_student_enabled(s.student);
+        corrector.set_student_threshold(if s.student_tau > 0 {
+            s.student_tau as f32 / 10_000.0
+        } else {
+            match s.strength {
+                ac_config::Strength::Careful => 0.999,
+                ac_config::Strength::Balanced => ac_core::STUDENT_TAU,
+                ac_config::Strength::Bold => 0.9,
+            }
+        });
+        corrector.set_student_fallback(s.student_fallback);
+        corrector.set_student_restricted(s.student_restricted);
+        corrector.set_student_blend(f64::from(s.student_weight) / 100.0, 0.0);
         let mut lines = Vec::new();
         self.journal.set_wait_for_right(s.journal && s.journal_right, &mut lines);
         lines.into_iter().for_each(log::journal);
@@ -103,6 +163,7 @@ impl State {
     /// appended), the per-program overrides, and the settings. One `stat`
     /// per file, only on focus changes, never per key.
     fn reload_files(&mut self) {
+        self.finish_student();
         fn changed(path: Option<std::path::PathBuf>, stamp: &mut Option<std::time::SystemTime>) -> Option<String> {
             let path = path?;
             let now = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
@@ -160,6 +221,7 @@ thread_local! {
         journal: Journal::default(),
         observed_keys: 0,
         observed_logged: None,
+        student: StudentLoad::NotTried,
     });
 }
 

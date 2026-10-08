@@ -86,6 +86,18 @@ pub struct Settings {
     pub journal_right: bool,
     /// Revise a word once the next one is typed ("that là" -> "thật là"). Experimental.
     pub delayed: bool,
+    /// Let the learned student decide the delayed revision, when its file is found (off: the
+    /// word statistics decide). Only matters with `delayed` on.
+    pub student: bool,
+    /// Confidence the student must reach before it proposes a fix, in hundredths of a percent (9900 = 0.99);
+    /// 0 follows `strength`.
+    pub student_tau: u32,
+    /// What the student leaves alone still goes to the word statistics' delayed revision.
+    pub student_fallback: bool,
+    /// The student's fix is chosen only among the readings the word statistics find plausible.
+    pub student_restricted: bool,
+    /// Weight of the word statistics next to the student's probabilities when choosing the fix, in hundredths.
+    pub student_weight: u32,
     /// Correct English in terminals and IDEs too (off: only Vietnamese there,
     /// so commands and code are left alone).
     pub code_english: bool,
@@ -110,6 +122,11 @@ impl Default for Settings {
             journal_hard: false,
             journal_right: false,
             delayed: false,
+            student: true,
+            student_tau: 0,
+            student_fallback: true,
+            student_restricted: true,
+            student_weight: 30,
             code_english: false,
             autocomplete_guard: true,
             restore_marks: true,
@@ -136,6 +153,11 @@ impl Settings {
                 "journal_hard" => s.journal_hard = on,
                 "journal_right" => s.journal_right = on,
                 "delayed" => s.delayed = on,
+                "student" => s.student = on,
+                "student_tau" => s.student_tau = value.trim().parse().ok().filter(|v| *v == 0 || (5000..=9999).contains(v)).unwrap_or(s.student_tau),
+                "student_fallback" => s.student_fallback = on,
+                "student_restricted" => s.student_restricted = on,
+                "student_weight" => s.student_weight = value.trim().parse().ok().filter(|v| *v <= 300).unwrap_or(s.student_weight),
                 "code_english" => s.code_english = on,
                 "autocomplete_guard" => s.autocomplete_guard = on,
                 "restore_marks" => s.restore_marks = on,
@@ -151,7 +173,7 @@ impl Settings {
     pub fn to_ini(&self) -> String {
         let flag = |b: bool| u8::from(b);
         format!(
-            "vietnamese={}\ncorrections={}\npaused={}\njournal={}\njournal_edits={}\njournal_hard={}\njournal_right={}\ndelayed={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\nhotkey={}\nstrength={}\ninput={}\n",
+            "vietnamese={}\ncorrections={}\npaused={}\njournal={}\njournal_edits={}\njournal_hard={}\njournal_right={}\ndelayed={}\nstudent={}\nstudent_tau={}\nstudent_fallback={}\nstudent_restricted={}\nstudent_weight={}\ncode_english={}\nautocomplete_guard={}\nrestore_marks={}\nhotkey={}\nstrength={}\ninput={}\n",
             flag(self.vietnamese),
             flag(self.corrections),
             flag(self.paused),
@@ -160,6 +182,11 @@ impl Settings {
             flag(self.journal_hard),
             flag(self.journal_right),
             flag(self.delayed),
+            flag(self.student),
+            self.student_tau,
+            flag(self.student_fallback),
+            flag(self.student_restricted),
+            self.student_weight,
             flag(self.code_english),
             flag(self.autocomplete_guard),
             flag(self.restore_marks),
@@ -190,6 +217,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn student_settings_ignore_values_out_of_range() {
+        let s = Settings::parse("student_tau=1\nstudent_weight=9999\n");
+        assert_eq!((s.student_tau, s.student_weight), (0, 30), "defaults stay");
+        let s = Settings::parse("student_tau=9900\nstudent_weight=0\nstudent_fallback=0\n");
+        assert_eq!((s.student_tau, s.student_weight, s.student_fallback), (9900, 0, false));
+        assert_eq!(Settings::parse("vietnamese=1\n").student_tau, 0, "an old file without the keys");
+    }
+
+    #[test]
     fn round_trips() {
         let s = Settings {
             vietnamese: false,
@@ -199,6 +235,11 @@ mod tests {
             journal_hard: true,
             journal_right: true,
             delayed: true,
+            student: false,
+            student_tau: 9950,
+            student_fallback: false,
+            student_restricted: false,
+            student_weight: 50,
             hotkey: Hotkey::parse("Ctrl+Shift").unwrap(),
             strength: Strength::Bold,
             ..Settings::default()

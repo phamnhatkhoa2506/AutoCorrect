@@ -7,6 +7,7 @@
 //! the same keys with corrections off, which tells what each word looked like
 //! as typed; every word then ends in one [`sim::Outcome`].
 
+pub mod keyboard;
 pub mod screen;
 pub mod sim;
 pub mod typist;

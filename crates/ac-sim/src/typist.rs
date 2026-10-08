@@ -124,10 +124,19 @@ pub enum Slip {
     /// The spaces between a run of words left out: "quanheej" for "quan hệ". Made by
     /// the simulation on several words at once ([`Profile::join`]), not by [`Profile::slip`].
     SpaceMissing,
+    /// The same, with at least one word that is not a Vietnamese syllable in the run ("mìnhtrain"): English words,
+    /// names and numbers do not get the syllable cutter, so this is measured apart.
+    SpaceMissingMixed,
+    /// The hand slides: two or three keys in a row, each next to the one before, put in at one place.
+    Slide,
+    /// A finger presses two keys at once: two keys next to one key, put on either side of it.
+    Multi,
+    /// A key held or bouncing: one key typed three or four times in a row ("nguuu").
+    Held,
 }
 
 impl Slip {
-    pub const ALL: [Slip; 10] = [
+    pub const ALL: [Slip; 14] = [
         Slip::Neighbour,
         Slip::Omit,
         Slip::Double,
@@ -138,6 +147,10 @@ impl Slip {
         Slip::MarkHalf,
         Slip::CapsHeld,
         Slip::SpaceMissing,
+        Slip::SpaceMissingMixed,
+        Slip::Slide,
+        Slip::Multi,
+        Slip::Held,
     ];
 
     pub fn name(self) -> &'static str {
@@ -152,6 +165,10 @@ impl Slip {
             Slip::MarkHalf => "mark-half",
             Slip::CapsHeld => "caps-held",
             Slip::SpaceMissing => "space-missing",
+            Slip::SpaceMissingMixed => "space-missing-mixed",
+            Slip::Slide => "slide",
+            Slip::Multi => "multi-press",
+            Slip::Held => "held-key",
         }
     }
 
@@ -163,9 +180,45 @@ impl Slip {
         let tone_last = vietnamese && k.last().is_some_and(|c| TONES.contains(c));
         match self {
             Slip::Neighbour => {
+                // A key next to the right one on the writer's keyboard, or one of the writer's own habits for it.
+                let i = rng.below(n);
+                k[i] = crate::keyboard::laptop().mistake_for(k[i], rng)?;
+            }
+            Slip::Slide => {
+                let at = rng.below(n + 1);
+                let mut pool: Vec<char> = Vec::new();
+                for side in [at.checked_sub(1).and_then(|i| k.get(i)), k.get(at)].into_iter().flatten() {
+                    pool.extend(neighbours(*side));
+                }
+                let mut block: Vec<char> = Vec::new();
+                for _ in 0..2 + rng.below(2) {
+                    let mut options = pool.clone();
+                    if let Some(&previous) = block.last() {
+                        options.extend(neighbours(previous));
+                    }
+                    block.push(*pick(&options, rng)?);
+                }
+                k.splice(at..at, block);
+            }
+            Slip::Multi => {
                 let i = rng.below(n);
                 let near = neighbours(k[i]);
-                k[i] = *pick(&near, rng)?;
+                let (a, b) = (*pick(&near, rng)?, *pick(&near, rng)?);
+                match rng.below(3) {
+                    0 => drop(k.splice(i..i, [a, b])),
+                    1 => drop(k.splice(i + 1..i + 1, [a, b])),
+                    _ => {
+                        k.insert(i + 1, b);
+                        k.insert(i, a);
+                    }
+                }
+            }
+            Slip::Held => {
+                let i = rng.below(n);
+                let copies = 2 + rng.below(2);
+                for _ in 0..copies {
+                    k.insert(i, k[i]);
+                }
             }
             Slip::Omit if n >= 3 => {
                 k.remove(rng.below(n));
@@ -212,28 +265,9 @@ fn pick<'a, T>(items: &'a [T], rng: &mut Rng) -> Option<&'a T> {
     (!items.is_empty()).then(|| &items[rng.below(items.len())])
 }
 
-/// QWERTY neighbours: same row left and right, and the keys diagonally above
-/// and below (the case of `c` is kept).
+/// The letters and digits on the keys next to the key of `c` on the writer's keyboard (the case of `c` is kept).
 fn neighbours(c: char) -> Vec<char> {
-    const ROWS: [&[u8]; 3] = [b"qwertyuiop", b"asdfghjkl", b"zxcvbnm"];
-    let lower = c.to_ascii_lowercase() as u8;
-    let mut out = Vec::new();
-    for (r, row) in ROWS.iter().enumerate() {
-        let Some(i) = row.iter().position(|&k| k == lower) else { continue };
-        if i > 0 {
-            out.push(row[i - 1]);
-        }
-        if i + 1 < row.len() {
-            out.push(row[i + 1]);
-        }
-        for other in [r.wrapping_sub(1), r + 1] {
-            if let Some(row) = ROWS.get(other) {
-                out.extend(row.get(i).copied());
-                out.extend(row.get(i + 1).copied());
-            }
-        }
-    }
-    out.into_iter().map(|b| if c.is_ascii_uppercase() { b.to_ascii_uppercase() } else { b } as char).collect()
+    crate::keyboard::laptop().neighbours(c)
 }
 
 /// How a typist types: how often and how they slip, and how they react.
@@ -249,11 +283,20 @@ pub struct Profile {
     pub undo: f64,
     /// Chance that a word stands in brackets or quotes, right against it: "(vì)".
     pub wrap: f64,
-    /// Chance, per sentence, that the space between two Vietnamese words is left
-    /// out ("quanheej" for "quan hệ"); at most once per sentence.
+    /// Chance, per sentence, that the spaces inside a run of words are left out ("quanheej" for
+    /// "quan hệ", "đichơi" for "đi chơi"). The words may be Vietnamese, English, names or numbers.
     pub join: f64,
-    /// The longest run of words typed without spaces.
+    /// The longest run of words typed without spaces (a run has 2 to `join_max` words). It is a cap on the data, never
+    /// an input of the problem: the length of a run is drawn from a long-tailed law (see `join_continue`).
     pub join_max: usize,
+    /// A run of k words becomes one of k + 1 with this chance (until `join_max`): two words are the most common, long
+    /// runs are rare but there, up to a whole sentence typed without a space.
+    pub join_continue: f64,
+    /// After a run, the chance of another one in the same sentence, and how many at most.
+    pub join_more: f64,
+    pub join_runs: usize,
+    /// Chance that a run also gets a slip of its own among its keys ("quanhej" with a swapped pair, a missing tone...).
+    pub join_slip: f64,
 }
 
 impl Default for Profile {
@@ -271,12 +314,20 @@ impl Default for Profile {
                 (Slip::ToneMissing, 8.0),
                 (Slip::MarkHalf, 7.0),
                 (Slip::CapsHeld, 2.0),
+                // The writer's own kinds (AUGMENT_RULES.md, B; the weights are guesses until calibrated).
+                (Slip::Slide, 3.0),
+                (Slip::Multi, 3.0),
+                (Slip::Held, 4.0),
             ],
             notice: 0.3,
             undo: 0.7,
             wrap: 0.02,
             join: 0.15,
-            join_max: 5,
+            join_max: 12,
+            join_continue: 0.55,
+            join_more: 0.3,
+            join_runs: 3,
+            join_slip: 0.25,
         }
     }
 }
@@ -355,6 +406,72 @@ mod tests {
         for _ in 0..50 {
             let near = Slip::Neighbour.apply(&keys, true, &mut rng).unwrap();
             assert_eq!(near.len(), keys.len());
+        }
+    }
+
+    /// Where `slipped` is `keys` with a block of `len` keys put in: the place, or `None`.
+    fn block_at(keys: &[char], slipped: &[char], len: usize) -> Vec<usize> {
+        (0..=keys.len()).filter(|&i| slipped[..i] == keys[..i] && slipped[i + len..] == keys[i..]).collect()
+    }
+
+    #[test]
+    fn the_writers_kinds_of_slip_stay_on_the_keyboard() {
+        let mut rng = Rng::new(3);
+        let keys: Vec<char> = "thuowngf".chars().collect();
+        for _ in 0..300 {
+            // a key held: one key three or four times in a row
+            let held = Slip::Held.apply(&keys, true, &mut rng).unwrap();
+            assert!((keys.len() + 2..=keys.len() + 3).contains(&held.len()));
+            assert!(!block_at(&keys, &held, held.len() - keys.len()).is_empty());
+
+            // a slide: two or three keys put in at one place, each next to a key beside that place or to the one before
+            let slid = Slip::Slide.apply(&keys, true, &mut rng).unwrap();
+            let len = slid.len() - keys.len();
+            assert!((2..=3).contains(&len));
+            let ok = block_at(&keys, &slid, len).into_iter().any(|i| {
+                let mut previous: Option<char> = None;
+                slid[i..i + len].iter().all(|&c| {
+                    let mut allowed = Vec::new();
+                    for side in [i.checked_sub(1).and_then(|j| keys.get(j)), keys.get(i)].into_iter().flatten() {
+                        allowed.extend(neighbours(*side));
+                    }
+                    allowed.extend(previous.map(neighbours).unwrap_or_default());
+                    previous = Some(c);
+                    allowed.contains(&c)
+                })
+            });
+            assert!(ok, "{keys:?} -> {slid:?}");
+
+            // two keys at once: both next to the key they are put around
+            let both = Slip::Multi.apply(&keys, true, &mut rng).unwrap();
+            assert_eq!(both.len(), keys.len() + 2);
+            let ok = (0..both.len()).any(|p| {
+                (p + 1..both.len()).any(|q| {
+                    // the two inserted keys at p and q; the other keys, in order, must be the ones typed
+                    let rest: Vec<(usize, char)> = both.iter().copied().enumerate().filter(|(x, _)| *x != p && *x != q).collect();
+                    rest.iter().map(|(_, c)| *c).eq(keys.iter().copied())
+                        && rest.iter().any(|&(at, key)| {
+                            let near = neighbours(key);
+                            [p, q].iter().all(|&x| near.contains(&both[x]) && x.abs_diff(at) <= 2 && x != at)
+                        })
+                })
+            });
+            assert!(ok, "{keys:?} -> {both:?}");
+        }
+    }
+
+    #[test]
+    fn a_neighbour_slip_uses_the_writers_habits_for_t() {
+        let mut rng = Rng::new(11);
+        let keys: Vec<char> = "tt".chars().collect();
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..400 {
+            let slipped = Slip::Neighbour.apply(&keys, false, &mut rng).unwrap();
+            seen.extend(slipped.into_iter().filter(|c| *c != 't'));
+        }
+        // the geometry (r y 5 6 f g) and the writer's own list (e u h)
+        for c in "ry56fgeuh".chars() {
+            assert!(seen.contains(&c), "{c} missing from {seen:?}");
         }
     }
 }

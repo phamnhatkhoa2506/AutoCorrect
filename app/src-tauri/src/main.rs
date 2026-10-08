@@ -19,6 +19,11 @@ struct Options {
     journal_hard: bool,
     journal_right: bool,
     delayed: bool,
+    student: bool,
+    student_tau: u32,
+    student_fallback: bool,
+    student_restricted: bool,
+    student_weight: u32,
     code_english: bool,
     autocomplete_guard: bool,
     restore_marks: bool,
@@ -75,6 +80,11 @@ fn options_of(s: &Settings) -> Options {
         journal_hard: s.journal_hard,
         journal_right: s.journal_right,
         delayed: s.delayed,
+        student: s.student,
+        student_tau: s.student_tau,
+        student_fallback: s.student_fallback,
+        student_restricted: s.student_restricted,
+        student_weight: s.student_weight,
         code_english: s.code_english,
         autocomplete_guard: s.autocomplete_guard,
         restore_marks: s.restore_marks,
@@ -173,6 +183,11 @@ fn save_options(options: Options) -> Result<(), String> {
     s.journal_hard = options.journal_hard;
     s.journal_right = options.journal_right;
     s.delayed = options.delayed;
+    s.student = options.student;
+    s.student_tau = if options.student_tau == 0 || (5000..=9999).contains(&options.student_tau) { options.student_tau } else { s.student_tau };
+    s.student_fallback = options.student_fallback;
+    s.student_restricted = options.student_restricted;
+    s.student_weight = options.student_weight.min(300);
     s.code_english = options.code_english;
     s.autocomplete_guard = options.autocomplete_guard;
     s.restore_marks = options.restore_marks;
